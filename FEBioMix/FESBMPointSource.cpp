@@ -31,6 +31,7 @@ SOFTWARE.*/
 #include <FECore/FESolidDomain.h>
 #include <FECore/FEElemElemList.h>
 #include <algorithm>
+#include <limits>
 #include <FEBioMech/FEElasticMaterialPoint.h>
 #include <iostream>
 #include <unordered_set>

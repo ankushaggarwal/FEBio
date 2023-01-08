@@ -2,10 +2,12 @@ NHDIR = $(dir $(CURDIR))
 
 # This needs to be set in order to find the febio .h files.
 #FEBINC = $(HOME)/febio-2.0new/sdk/include
-FEBINC = $(HOME)/codes/FEBio
+#FEBINC = $(HOME)/FEBio
+FEBINC = /opt/FEBioStudio/sdk/include
 # This needs to be set in order to find the febio library files.
 #FEBLIB = $(HOME)/febio-2.0new/sdk/lib
-FEBLIB = $(FEBINC)/cbuild/lib
+#FEBLIB = $(FEBINC)/cbuild/lib
+FEBLIB = /opt/FEBioStudio/sdk/lib
 
 lnx64: PLAT = lnx64
 lnx32: PLAT = lnx32
@@ -25,7 +27,7 @@ export CC = c++
 export FLG = -O3 -fPIC -std=gnu++11
 
 # Can be removed if not using the Intel compiler.
-export LNKFLG = -static-intel
+#export LNKFLG = -static-intel
 export INC = -I$(FEBINC)
 
 lnx64 lnx32 gcc:

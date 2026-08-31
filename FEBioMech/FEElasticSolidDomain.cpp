@@ -27,6 +27,7 @@ SOFTWARE.*/
 
 
 #include "stdafx.h"
+#include <limits>
 #include "FEElasticSolidDomain.h"
 #include "FEElasticMaterial.h"
 #include "FEBodyForce.h"
@@ -36,6 +37,7 @@ SOFTWARE.*/
 #include <FECore/sys.h>
 #include "FEBioMech.h"
 #include <FECore/FELinearSystem.h>
+#include "FEResidualVector.h"
 
 //-----------------------------------------------------------------------------
 //! constructor
@@ -48,13 +50,16 @@ FEElasticSolidDomain::FEElasticSolidDomain(FEModel* pfem) : FESolidDomain(pfem),
     m_alpham = 2;
 	m_update_dynamic = true; // default for backward compatibility
 
-	// TODO: Move this elsewhere since there is no error checking
+	m_secant_stress = false;
+	m_secant_tangent = false;
+
+	// TODO: Can this be done in Init, since  there is no error checking
 	if (pfem)
 	{
 		m_dofU.AddVariable(FEBioMech::GetVariableName(FEBioMech::DISPLACEMENT));
 		m_dofR.AddVariable(FEBioMech::GetVariableName(FEBioMech::RIGID_ROTATION));
 		m_dofSU.AddVariable(FEBioMech::GetVariableName(FEBioMech::SHELL_DISPLACEMENT));
-		m_dofV.AddVariable(FEBioMech::GetVariableName(FEBioMech::VELOCTIY));
+		m_dofV.AddVariable(FEBioMech::GetVariableName(FEBioMech::VELOCITY));
 		m_dofSV.AddVariable(FEBioMech::GetVariableName(FEBioMech::SHELL_VELOCITY));
 		m_dofSA.AddVariable(FEBioMech::GetVariableName(FEBioMech::SHELL_ACCELERATION));
 	}
@@ -137,8 +142,8 @@ void FEElasticSolidDomain::PreSolveUpdate(const FETimeInfo& timeInfo)
     m_alpham = timeInfo.alpham;
     m_beta = timeInfo.beta;
 
-	vec3d r0, rt;
-	for (size_t i=0; i<Elements(); ++i)
+#pragma omp parallel for
+	for (int i=0; i<Elements(); ++i)
 	{
 		FESolidElement& el = m_Elem[i];
 		if (el.isActive())
@@ -351,7 +356,7 @@ void FEElasticSolidDomain::ElementMaterialStiffness(FESolidElement &el, matrix &
 
 		// get the 'D' matrix
 //		tens4ds C = m_pMat->Tangent(mp);
-        tens4dmm C = m_pMat->SolidTangent(mp);
+        tens4dmm C = (m_secant_tangent ? m_pMat->SecantTangent(mp) : m_pMat->SolidTangent(mp));
 		C.extract(D);
 
 		// we only calculate the upper triangular part
@@ -565,12 +570,7 @@ void FEElasticSolidDomain::Update(const FETimeInfo& tp)
 		}
 	}
 
-	// if we encountered an error, we request a running restart
-	if (berr)
-	{
-		if (NegativeJacobian::DoOutput() == false) feLogError("Negative jacobian was detected.");
-		throw DoRunningRestart();
-	}
+	if (berr) throw NegativeJacobianDetected();
 }
 
 //-----------------------------------------------------------------------------
@@ -613,7 +613,7 @@ void FEElasticSolidDomain::UpdateElementStress(int iel, const FETimeInfo& tp)
 		FEElasticMaterialPoint& pt = *(mp.ExtractData<FEElasticMaterialPoint>());
 
 		// material point coordinates
-		pt.m_rt = el.Evaluate(r, n);
+		mp.m_rt = el.Evaluate(r, n);
 
 		// get the deformation gradient and determinant at intermediate time
         double Jt;
@@ -645,10 +645,11 @@ void FEElasticSolidDomain::UpdateElementStress(int iel, const FETimeInfo& tp)
         
 		// calculate the stress at this material point
 //		pt.m_s = m_pMat->Stress(mp);
-		pt.m_s = m_pMat->SolidStress(mp);
+		pt.m_s = (m_secant_stress ? m_pMat->SecantStress(mp) : m_pMat->Stress(mp));
         
         // adjust stress for strain energy conservation
-        if (m_alphaf == 0.5) 
+		// (Apply only for mid-point rule)
+		if (m_alphaf == 0.5)
 		{
 			FEElasticMaterial* pme = dynamic_cast<FEElasticMaterial*>(m_pMat);
 
@@ -663,8 +664,10 @@ void FEElasticSolidDomain::UpdateElementStress(int iel, const FETimeInfo& tp)
 
             mat3ds D = pt.RateOfDeformation();
             double D2 = D.dotdot(D);
-            if (D2 > 0)
-                pt.m_s += D*(((pt.m_Wt-pt.m_Wp)/(dt*pt.m_J) - pt.m_s.dotdot(D))/D2);
+			if (D2 > std::numeric_limits<double>::epsilon())
+			{
+				pt.m_s += D * (((pt.m_Wt - pt.m_Wp) / (dt * pt.m_J) - pt.m_s.dotdot(D)) / D2);
+			}
         }
     }
 }
@@ -712,7 +715,8 @@ void FEElasticSolidDomain::UnpackLM(FEElement& el, vector<int>& lm)
 void FEElasticSolidDomain::InertialForces(FEGlobalVector& R, vector<double>& F)
 {
     int NE = Elements();
-    for (int i=0; i<NE; ++i)
+#pragma omp parallel for shared(R, F)
+	for (int i=0; i<NE; ++i)
     {
 		// get the element
 		FESolidElement& el = m_Elem[i];
@@ -763,4 +767,18 @@ void FEElasticSolidDomain::ElementInertialForce(FESolidElement& el, vector<doubl
             fe[3*i+2] -= tmp*pt.m_a.z;
         }
     }
+}
+
+
+//=================================================================================================
+
+BEGIN_FECORE_CLASS(FEStandardElasticSolidDomain, FEElasticSolidDomain)
+	ADD_PARAMETER(m_elemType, "elem_type", FE_PARAM_ATTRIBUTE, "$(solid_element)\0");
+	ADD_PARAMETER(m_secant_stress, "secant_stress");
+	ADD_PARAMETER(m_secant_tangent, "secant_tangent");
+END_FECORE_CLASS();
+
+FEStandardElasticSolidDomain::FEStandardElasticSolidDomain(FEModel* fem) : FEElasticSolidDomain(fem)
+{
+
 }

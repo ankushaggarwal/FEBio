@@ -28,7 +28,7 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "IncompleteCholesky.h"
-#include "CompactSymmMatrix.h"
+#include <FECore/CompactSymmMatrix.h>
 #include <FECore/log.h>
 
 // We must undef PARDISO since it is defined as a function in mkl_solver.h
@@ -43,7 +43,7 @@ SOFTWARE.*/
 
 IncompleteCholesky::IncompleteCholesky(FEModel* fem) : Preconditioner(fem)
 {
-
+	m_L = nullptr;
 }
 
 CompactSymmMatrix* IncompleteCholesky::getMatrix()
@@ -66,6 +66,7 @@ bool IncompleteCholesky::Factor()
 	z.resize(N, 0.0);
 
 	// create the preconditioner
+	if (m_L) delete m_L;
 	m_L = new CompactSymmMatrix(K->Offset());
 	double* val = new double[nnz];
 	int* row = new int[nnz];

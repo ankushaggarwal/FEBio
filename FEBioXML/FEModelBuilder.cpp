@@ -37,18 +37,14 @@ SOFTWARE.*/
 #include <FECore/FEInitialCondition.h>
 #include <FECore/FEModelLoad.h>
 #include <FECore/FELoadCurve.h>
-#include <FEBioMech/RigidBC.h>
-#include <FEBioMech/FEUDGHexDomain.h>
-#include <FEBioMech/FEUT4Domain.h>
-#include <FEBioMech/FEMechModel.h>
 #include <FECore/FESurfaceMap.h>
 #include <FECore/FEDomainMap.h>
 #include <FECore/FEEdge.h>
 #include <FECore/FEConstValueVec3.h>
-#include <FECore/log.h>
 #include <FECore/FEDataGenerator.h>
-#include <FECore/FECoreKernel.h>
-#include <FEBioMech/FESSIShellDomain.h>
+#include <FECore/FEPointFunction.h>
+#include <FECore/FESurfacePairConstraint.h>
+#include <FECore/FENLConstraint.h>
 #include <sstream>
 
 //-----------------------------------------------------------------------------
@@ -93,10 +89,15 @@ FEModelBuilder::FEModelBuilder(FEModel& fem) : m_fem(fem)
 }
 
 //-----------------------------------------------------------------------------
-void FEModelBuilder::SetModuleName(const std::string& moduleName)
+FEModelBuilder::~FEModelBuilder() 
 {
-	m_fem.SetModuleName(moduleName);
-	FECoreKernel::GetInstance().SetActiveModule(moduleName.c_str());
+
+}
+
+//-----------------------------------------------------------------------------
+void FEModelBuilder::SetActiveModule(const std::string& moduleName)
+{
+	m_fem.SetActiveModule(moduleName);
 }
 
 //-----------------------------------------------------------------------------
@@ -107,13 +108,15 @@ std::string FEModelBuilder::GetModuleName() const
 }
 
 //-----------------------------------------------------------------------------
-FEAnalysis* FEModelBuilder::CreateNewStep()
+FEAnalysis* FEModelBuilder::CreateNewStep(bool allocSolver)
 {
-	FEAnalysis* pstep = fecore_new<FEAnalysis>("analysis", &m_fem);
+	// default analysis type should match module name
+	std::string modName = GetModuleName();
+	FEAnalysis* pstep = fecore_new<FEAnalysis>(modName.c_str(), &m_fem);
 
 	// make sure we have a solver defined
 	FESolver* psolver = pstep->GetFESolver();
-	if (psolver == 0)
+	if ((psolver == 0) && allocSolver)
 	{
 		psolver = BuildSolver(m_fem);
 		if (psolver == 0) return 0;
@@ -135,6 +138,7 @@ FESolver* FEModelBuilder::BuildSolver(FEModel& fem)
 {
 	string moduleName = fem.GetModuleName();
 	const char* sztype = moduleName.c_str();
+	if (m_defaultSolver.empty() == false) sztype = m_defaultSolver.c_str();
 	FESolver* ps = fecore_new<FESolver>(sztype, &fem);
 	return ps;
 }
@@ -143,7 +147,7 @@ FESolver* FEModelBuilder::BuildSolver(FEModel& fem)
 void FEModelBuilder::NextStep()
 {
 	// reset the step pointer
-	if (m_nsteps != 0) m_pStep = 0;
+	if (m_nsteps != 0) m_pStep = nullptr;
 
 	// increase the step section counter
 	++m_nsteps;
@@ -169,35 +173,15 @@ FEDomain* FEModelBuilder::CreateDomain(FE_Element_Spec espec, FEMaterial* mat)
 {
 	FECoreKernel& febio = FECoreKernel::GetInstance();
 	FEDomain* pdom = febio.CreateDomain(espec, &m_fem.GetMesh(), mat);
-
-	// Handle dome special cases
-	// TODO: Find a better way of dealing with these special cases
-	FEUDGHexDomain* udg = dynamic_cast<FEUDGHexDomain*>(pdom);
-	if (udg)
-	{
-		udg->SetHourGlassParameter(m_udghex_hg);
-	}
-
-	FEUT4Domain* ut4 = dynamic_cast<FEUT4Domain*>(pdom);
-	if (ut4)
-	{
-		ut4->SetUT4Parameters(m_ut4_alpha, m_ut4_bdev);
-	}
-    
-    FESSIShellDomain* ssi = dynamic_cast<FESSIShellDomain*>(pdom);
-    if (ssi) {
-        ssi->m_bnodalnormals = espec.m_shell_norm_nodal;
-    }
-
 	return pdom;
 }
 
 //-----------------------------------------------------------------------------
-FEAnalysis* FEModelBuilder::GetStep()
+FEAnalysis* FEModelBuilder::GetStep(bool allocSolver)
 {
 	if (m_pStep == 0)
 	{
-		m_pStep = CreateNewStep();
+		m_pStep = CreateNewStep(allocSolver);
 		m_fem.AddStep(m_pStep);
 		if (m_fem.Steps() == 1)
 		{
@@ -208,12 +192,17 @@ FEAnalysis* FEModelBuilder::GetStep()
 	return m_pStep;
 }
 
+void FEModelBuilder::AddMaterial(FEMaterial* pmat)
+{
+	m_fem.AddMaterial(pmat);
+}
+
 //-----------------------------------------------------------------------------
-void FEModelBuilder::AddComponent(FEModelComponent* pmc)
+void FEModelBuilder::AddComponent(FEStepComponent* pmc)
 {
 	if (m_nsteps > 0)
 	{
-		GetStep()->AddModelComponent(pmc);
+		GetStep()->AddStepComponent(pmc);
 		pmc->Deactivate();
 	}
 }
@@ -228,21 +217,21 @@ void FEModelBuilder::AddBC(FEBoundaryCondition* pbc)
 //-----------------------------------------------------------------------------
 void FEModelBuilder::AddNodalLoad(FENodalLoad* pfc)
 {
-	m_fem.AddNodalLoad(pfc);
+	m_fem.AddModelLoad(pfc);
 	AddComponent(pfc);
 }
 
 //-----------------------------------------------------------------------------
 void FEModelBuilder::AddSurfaceLoad(FESurfaceLoad* psl)
 {
-	m_fem.AddSurfaceLoad(psl);
+	m_fem.AddModelLoad(psl);
 	AddComponent(psl);
 }
 
 //-----------------------------------------------------------------------------
 void FEModelBuilder::AddEdgeLoad(FEEdgeLoad* pel)
 {
-	m_fem.AddEdgeLoad(pel);
+	m_fem.AddModelLoad(pel);
 	AddComponent(pel);
 }
 
@@ -275,32 +264,7 @@ void FEModelBuilder::AddNonlinearConstraint(FENLConstraint* pnc)
 }
 
 //-----------------------------------------------------------------------------
-void FEModelBuilder::AddRigidFixedBC(FERigidBodyFixedBC* prc)
-{
-	static_cast<FEMechModel&>(m_fem).AddRigidFixedBC(prc);
-	AddComponent(prc);
-}
-
-//-----------------------------------------------------------------------------
-void FEModelBuilder::AddRigidPrescribedBC(FERigidBodyDisplacement* prc)
-{
-	static_cast<FEMechModel&>(m_fem).AddRigidPrescribedBC(prc);
-	AddComponent(prc);	
-}
-
-//-----------------------------------------------------------------------------
-void FEModelBuilder::AddRigidIC(FERigidIC* ric)
-{
-	static_cast<FEMechModel&>(m_fem).AddRigidInitialCondition(ric);
-	AddComponent(ric);
-}
-
-//-----------------------------------------------------------------------------
-void FEModelBuilder::AddRigidNodeSet(FERigidNodeSet* rs)
-{
-	static_cast<FEMechModel&>(m_fem).AddRigidNodeSet(rs);
-	AddComponent(rs);
-}
+void FEModelBuilder::AddRigidComponent(FEStepComponent* pmc) { assert(false); }
 
 //---------------------------------------------------------------------------------
 // parse a surface section for contact definitions
@@ -363,32 +327,11 @@ bool FEModelBuilder::BuildSurface(FESurface& s, FEFacetSet& fs, bool bnodal)
 //-----------------------------------------------------------------------------
 bool FEModelBuilder::BuildEdge(FEEdge& e, FESegmentSet& es)
 {
-	FEMesh& m = m_fem.GetMesh();
-	int NN = m.Nodes();
-
-	// count nr of segments
-	int nsegs = es.Segments();
-
-	// allocate storage for faces
-	e.Create(nsegs);
-
-	// read segments
-	for (int i = 0; i<nsegs; ++i)
-	{
-		FELineElement& el = e.Element(i);
-		FESegmentSet::SEGMENT& si = es.Segment(i);
-
-		if (si.ntype == 2) el.SetType(FE_LINE2G1);
-		else return false;
-
-		int N = el.Nodes(); assert(N == si.ntype);
-		for (int j = 0; j<N; ++j) el.m_node[j] = si.node[j];
-	}
-
 	// copy the name
 	e.SetName(es.GetName());
 
-	return true;
+	// create the edge
+	return e.Create(es);
 }
 
 //-----------------------------------------------------------------------------
@@ -469,7 +412,7 @@ void FEModelBuilder::SetDefaultVariables()
 	dofs.SetDOFName(varD, 0, "x");
 	dofs.SetDOFName(varD, 1, "y");
 	dofs.SetDOFName(varD, 2, "z");
-	int varQ = dofs.AddVariable("shell rotation", VAR_VEC3);
+	int varQ = dofs.AddVariable("rotation", VAR_VEC3);
 	dofs.SetDOFName(varQ, 0, "u");
 	dofs.SetDOFName(varQ, 1, "v");
 	dofs.SetDOFName(varQ, 2, "w");
@@ -505,9 +448,9 @@ void FEModelBuilder::SetDefaultVariables()
 	dofs.SetDOFName(varAF, 0, "afx");
 	dofs.SetDOFName(varAF, 1, "afy");
 	dofs.SetDOFName(varAF, 2, "afz");
-	int varEF = dofs.AddVariable("fluid dilation");
+	int varEF = dofs.AddVariable("fluid dilatation");
 	dofs.SetDOFName(varEF, 0, "ef");
-	int varAEF = dofs.AddVariable("fluid dilation tderiv");
+	int varAEF = dofs.AddVariable("fluid dilatation tderiv");
 	dofs.SetDOFName(varAEF, 0, "aef");
 	int varQV = dofs.AddVariable("shell velocity", VAR_VEC3);
 	dofs.SetDOFName(varQV, 0, "svx");
@@ -554,10 +497,14 @@ FE_Element_Spec FEModelBuilder::ElementSpec(const char* sztype)
 	else if (strcmp(sztype, "quad8"  ) == 0) { eshape = ET_QUAD8; stype = FE_SHELL_QUAD8G18; }   // default shell type for quad8
 	else if (strcmp(sztype, "quad9"  ) == 0) eshape = ET_QUAD9;
 	else if (strcmp(sztype, "tri3"   ) == 0) { eshape = ET_TRI3; stype = FE_SHELL_TRI3G6; }     // default shell type for tri3
+	else if (strcmp(sztype, "tri3s"  ) == 0) { eshape = ET_TRI3; stype = FE_SHELL_TRI3G3; }     // should only be used for rigid shells
 	else if (strcmp(sztype, "tri6"   ) == 0) { eshape = ET_TRI6; stype = FE_SHELL_TRI6G14; }     // default shell type for tri6
-    else if (strcmp(sztype, "q4eas"  ) == 0) { eshape = ET_QUAD4; stype = FE_SHELL_QUAD4G8; m_default_shell = EAS_SHELL; }   // default shell type for q4eas
-    else if (strcmp(sztype, "q4ans"  ) == 0) { eshape = ET_QUAD4; stype = FE_SHELL_QUAD4G8; m_default_shell = ANS_SHELL; }   // default shell type for q4ans
+	else if (strcmp(sztype, "q4eas"  ) == 0) { eshape = ET_QUAD4; stype = FE_SHELL_QUAD4G8; m_default_shell = EAS_SHELL; }   // default shell type for q4eas
+	else if (strcmp(sztype, "q4ans"  ) == 0) { eshape = ET_QUAD4; stype = FE_SHELL_QUAD4G8; m_default_shell = ANS_SHELL; }   // default shell type for q4ans
+	else if (strcmp(sztype, "q4s"    ) == 0) { eshape = ET_QUAD4; stype = FE_SHELL_QUAD4G4; m_default_shell = -1; } // should only be used for rigid shells
 	else if (strcmp(sztype, "truss2" ) == 0) eshape = ET_TRUSS2;
+	else if (strcmp(sztype, "line2"  ) == 0) eshape = ET_TRUSS2;
+	else if (strcmp(sztype, "line3"  ) == 0) eshape = ET_LINE3;
 	else if (strcmp(sztype, "ut4"    ) == 0) { eshape = ET_TET4; m_but4 = true; }
 	else
 	{
@@ -599,6 +546,8 @@ FE_Element_Spec FEModelBuilder::ElementSpec(const char* sztype)
 		else if (strcmp(sztype, "TRI6G14"     ) == 0) { eshape = ET_TRI6; stype = FE_SHELL_TRI6G14; }
 		else if (strcmp(sztype, "TRI6G21"     ) == 0) { eshape = ET_TRI6; stype = FE_SHELL_TRI6G21; }
 		else if (strcmp(sztype, "HEX8G1"      ) == 0) { eshape = ET_HEX8; m_nhex8 = FE_HEX8G1; }
+		else if (strcmp(sztype, "HEX8G8"      ) == 0) { eshape = ET_HEX8; m_nhex8 = FE_HEX8G8; }
+		else if (strcmp(sztype, "HEX8G6"      ) == 0) { eshape = ET_HEX8; m_nhex8 = FE_HEX8RI; }
 		else
 		{
 			assert(false);
@@ -633,6 +582,7 @@ FE_Element_Spec FEModelBuilder::ElementSpec(const char* sztype)
 	case ET_QUAD8  : etype = (NDIM == 3 ? stype : FE2D_QUAD8G9); break;
 	case ET_QUAD9  : etype = FE2D_QUAD9G9; break;
 	case ET_TRUSS2 : etype = FE_TRUSS; break;
+	case ET_LINE3  : etype = FE_BEAM3G2; break;
 	default:
 		assert(false);
 	}
@@ -687,9 +637,9 @@ void FEModelBuilder::AddMappedParameter(FEParam* p, FECoreBase* parent, const ch
 	m_mappedParams.push_back(mp);
 }
 
-void FEModelBuilder::AddMeshDataGenerator(FEDataGenerator* gen, FEDomainMap* map, FEParamDouble* pp)
+void FEModelBuilder::AddMeshDataGenerator(FEMeshDataGenerator* gen, FEDataMap* pmap, FEParamDouble* pp)
 {
-	m_mapgen.push_back(DataGen{ gen, map, pp });
+	m_mapgen.push_back(DataGen{ gen, pmap, pp });
 }
 
 void FEModelBuilder::ApplyParameterMaps()
@@ -782,6 +732,8 @@ FENodeSet* FEModelBuilder::FindNodeSet(const string& setName)
 {
 	FEMesh& mesh = m_fem.GetMesh();
 
+	FENodeSet* nodeSet = nullptr;
+
 	if (setName.compare(0, 9, "@surface:") == 0)
 	{
 		// see if we can find a surface
@@ -791,17 +743,34 @@ FENodeSet* FEModelBuilder::FindNodeSet(const string& setName)
 
 		// we might have been here before. If so, we already create a nodeset
 		// with the same name as the surface, so look for that first.
-		FENodeSet* ps = mesh.FindNodeSet(surfName);
-		if (ps) return ps;
+		nodeSet = mesh.FindNodeSet(surfName);
+		if (nodeSet) return nodeSet;
 
 		// okay, first time here, so let's create a node set from this surface
 		FENodeList nodeList = surf->GetNodeList();
-		ps = fecore_alloc(FENodeSet, &m_fem);
-		ps->Add(nodeList);
-		ps->SetName(surfName);
-		mesh.AddNodeSet(ps);
+		nodeSet = new FENodeSet(&m_fem);
+		nodeSet->Add(nodeList);
+		nodeSet->SetName(surfName);
+		mesh.AddNodeSet(nodeSet);
+	}
+	else if (setName.compare(0, 6, "@edge:") == 0)
+	{
+		// see if we can find an edge
+		string edgeName = setName.substr(6);
+		FESegmentSet* edge = mesh.FindSegmentSet(edgeName);
+		if (edge == nullptr) return nullptr;
 
-		return ps;
+		// we might have been here before. If so, we already create a nodeset
+		// with the same name as the edge, so look for that first.
+		nodeSet = mesh.FindNodeSet(edgeName);
+		if (nodeSet) return nodeSet;
+
+		// okay, first time here, so let's create a node set from this surface
+		FENodeList nodeList = edge->GetNodeList();
+		nodeSet = new FENodeSet(&m_fem);
+		nodeSet->Add(nodeList);
+		nodeSet->SetName(edgeName);
+		mesh.AddNodeSet(nodeSet);
 	}
 	else if (setName.compare(0, 10, "@elem_set:") == 0)
 	{
@@ -812,19 +781,37 @@ FENodeSet* FEModelBuilder::FindNodeSet(const string& setName)
 
 		// we might have been here before. If so, we already create a nodeset
 		// with the same name as the surface, so look for that first.
-		FENodeSet* ps = mesh.FindNodeSet(esetName);
-		if (ps) return ps;
+		nodeSet = mesh.FindNodeSet(esetName);
+		if (nodeSet) return nodeSet;
 
 		// okay, first time here, so let's create a node set from this element set
 		FENodeList nodeList = part->GetNodeList();
-		ps = fecore_alloc(FENodeSet, &m_fem);
-		ps->Add(nodeList);
-		ps->SetName(esetName);
-		mesh.AddNodeSet(ps);
-
-		return ps;
+		nodeSet = new FENodeSet(&m_fem);
+		nodeSet->Add(nodeList);
+		nodeSet->SetName(esetName);
+		mesh.AddNodeSet(nodeSet);
 	}
-	else return mesh.FindNodeSet(setName);
+	else if (setName.compare(0, 11, "@part_list:") == 0)
+	{
+		// see if we can find an element set
+		FEElementSet* part = mesh.FindElementSet(setName);
+		if (part == nullptr) return nullptr;
+
+		// we might have been here before. If so, we already create a nodeset
+		// with the same name as the surface, so look for that first.
+		nodeSet = mesh.FindNodeSet(setName);
+		if (nodeSet) return nodeSet;
+
+		// okay, first time here, so let's create a node set from this element set
+		FENodeList nodeList = part->GetNodeList();
+		nodeSet = new FENodeSet(&m_fem);
+		nodeSet->Add(nodeList);
+		nodeSet->SetName(setName);
+		mesh.AddNodeSet(nodeSet);
+	}
+	else nodeSet = mesh.FindNodeSet(setName);
+
+	return nodeSet;
 }
 
 void FEModelBuilder::MapLoadCurveToFunction(FEPointFunction* pf, int lc, double scale)
@@ -843,9 +830,9 @@ void FEModelBuilder::ApplyLoadcurvesToFunctions()
 		FELoadController* plc = fem.GetLoadController(m.lc); assert(plc);
 		FELoadCurve* lc = dynamic_cast<FELoadCurve*>(plc);
 
-		FEPointFunction& f = lc->GetFunction();
-
-		m.pf->CopyFrom(f);
+		m.pf->SetInterpolation(lc->GetInterpolation());
+		m.pf->SetExtendMode(lc->GetExtendMode());
+		m.pf->SetPoints(lc->GetPoints());
 		if (m.scale != 1.0) m.pf->Scale(m.scale);
 	}
 }
@@ -856,39 +843,77 @@ bool FEModelBuilder::GenerateMeshDataMaps()
 	FEMesh& mesh = GetMesh();
 	for (int i = 0; i < m_mapgen.size(); ++i)
 	{
-		FEDataGenerator* gen = m_mapgen[i].gen;
-		FEDomainMap* map = m_mapgen[i].map;
-		FEParamDouble* pp = m_mapgen[i].pp;
+		FEMeshDataGenerator* gen = m_mapgen[i].gen;
 
-		// initialize the generator
+		// try to initialize the generator
 		if (gen->Init() == false) return false;
 
-		// generate the data
-		if (gen->Generate(*map) == false) return false;
-
-		// see if this map is already defined
-		string mapName = map->GetName();
-		FEDomainMap* oldMap = dynamic_cast<FEDomainMap*>(mesh.FindDataMap(mapName));
-		if (oldMap)
+		FENodeDataGenerator* ngen = dynamic_cast<FENodeDataGenerator*>(gen);
+		if (ngen)
 		{
-			// it is, so merge it
-			oldMap->Merge(*map);
+			// see if this map is already defined
+			string mapName = ngen->GetName();
+			FENodeDataMap* oldMap = dynamic_cast<FENodeDataMap*>(mesh.FindDataMap(mapName));
+			if (oldMap) return false;
 
-			// we can now delete this map
-			delete map;
-		}
-		else
-		{
-			// nope, so add it
+			// generate the node data map
+			if (ngen->Init() == false) return false;
+			FEDataMap* map = ngen->Generate();
+			if (map == nullptr) return false;
 			map->SetName(mapName);
 			mesh.AddDataMap(map);
+		}
 
-			// apply the map
-			if (pp)
+		FEFaceDataGenerator* fgen = dynamic_cast<FEFaceDataGenerator*>(gen);
+		if (fgen)
+		{
+			// see if this map is already defined
+			string mapName = fgen->GetName();
+			FESurfaceMap* oldMap = dynamic_cast<FESurfaceMap*>(mesh.FindDataMap(mapName));
+			if (oldMap) return false;
+
+			// generate data
+			if (fgen->Init() == false) return false;
+			FEDataMap* map = fgen->Generate();
+			if (map == nullptr) return false;
+			map->SetName(mapName);
+			mesh.AddDataMap(map);
+		}
+
+		FEElemDataGenerator* egen = dynamic_cast<FEElemDataGenerator*>(gen);
+		if (egen)
+		{
+			if (egen->Init() == false) return false;
+
+			// generate the data
+			FEDomainMap* map = dynamic_cast<FEDomainMap*>(egen->Generate());
+			if (map == nullptr) return false;
+
+			// see if this map is already defined
+			string mapName = gen->GetName();
+			FEDomainMap* oldMap = dynamic_cast<FEDomainMap*>(mesh.FindDataMap(mapName));
+			if (oldMap)
 			{
-				FEMappedValue* val = fecore_alloc(FEMappedValue, &fem);
-				val->setDataMap(map);
-				pp->setValuator(val);
+				// it is, so merge it
+				oldMap->Merge(*map);
+
+				// we can now delete this map
+				delete map;
+			}
+			else
+			{
+				// nope, so add it
+				map->SetName(mapName);
+				mesh.AddDataMap(map);
+
+				// apply the map
+				FEParamDouble* pp = m_mapgen[i].pp;
+				if (pp)
+				{
+					FEMappedValue* val = fecore_alloc(FEMappedValue, &fem);
+					val->setDataMap(map);
+					pp->setValuator(val);
+				}
 			}
 		}
 	}

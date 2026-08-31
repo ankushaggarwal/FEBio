@@ -33,8 +33,10 @@ class FEMaterialPoint;
 
 //-----------------------------------------------------------------------------
 // Base class for RVE probes
-class FERVEProbe : public FECallBack
+class FEBIORVE_API FERVEProbe : public FECallBack
 {
+	FECORE_BASE_CLASS(FERVEProbe);
+
 public:
 	// The first FEModel (fem) is the macro-problem, i.e. the model that will generate the callbacks
 	// The second FEModel (rve) is the micro-problem that needs to be tracked.

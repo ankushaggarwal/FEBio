@@ -29,8 +29,6 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "LinearSolver.h"
 
-REGISTER_SUPER_CLASS(LinearSolver, FELINEARSOLVER_ID);
-
 //-----------------------------------------------------------------------------
 LinearSolver::LinearSolver(FEModel* fem) : FECoreBase(fem)
 {
@@ -88,6 +86,12 @@ int LinearSolver::GetPartitionSize(int part) const
 const LinearSolverStats& LinearSolver::GetStats() const
 {
 	return	m_stats;
+}
+
+double LinearSolver::ConditionNumber()
+{
+	// returns an invalid value for the condition number
+	return 0.0;
 }
 
 //-----------------------------------------------------------------------------

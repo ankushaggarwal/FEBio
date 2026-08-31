@@ -30,15 +30,30 @@ SOFTWARE.*/
 #include "FEItemList.h"
 #include "DumpStream.h"
 #include "FEModel.h"
+#include "FENodeSet.h"
+#include "FEFacetSet.h"
+#include "FEElementSet.h"
+#include "FESegmentSet.h"
 
-REGISTER_SUPER_CLASS(FEItemList, FEITEMLIST_ID);
-
-FEItemList::FEItemList(FEModel* fem) : FECoreBase(fem)
+FEItemList::FEItemList(FEModel* fem, FEItemType type) : m_type(type)
 {
+	m_mesh = nullptr;
 	if (fem)
 	{
 		m_mesh = &fem->GetMesh();
 	}
+}
+
+FEItemList::FEItemList(FEMesh* mesh, FEItemType type) : m_type(type)
+{
+	m_mesh = mesh;
+}
+
+FEItemList::~FEItemList() {}
+
+void FEItemList::Serialize(DumpStream& ar)
+{
+	ar & m_name;
 }
 
 // get the mesh
@@ -50,4 +65,40 @@ FEMesh* FEItemList::GetMesh() const
 void FEItemList::SetMesh(FEMesh* mesh)
 {
 	m_mesh = mesh;
+}
+
+const std::string& FEItemList::GetName() const
+{
+	return m_name;
+}
+
+void FEItemList::SetName(const std::string& name)
+{
+	m_name = name;
+}
+
+FEItemList* FEItemList::LoadClass(DumpStream& ar, FEItemList* p)
+{
+	int ntype = -1;
+	ar >> ntype;
+	FEItemList* pi = nullptr;
+	FEModel* fem = &ar.GetFEModel();
+	switch (ntype)
+	{
+	case FE_NODE_SET   : pi = new FENodeSet   (fem); break;
+	case FE_FACET_SET  : pi = new FEFacetSet  (fem); break;
+	case FE_ELEMENT_SET: pi = new FEElementSet(fem); break;
+	case FE_SEGMENT_SET: pi = new FESegmentSet(fem); break;
+	default:
+		assert(false);
+		break;
+	}
+	
+	return pi;
+}
+
+void FEItemList::SaveClass(DumpStream& ar, FEItemList* p)
+{
+	int ntype = (int) p->Type();
+	ar << (int)ntype;
 }

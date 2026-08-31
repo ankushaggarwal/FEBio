@@ -30,7 +30,6 @@ SOFTWARE.*/
 #include "FEDomainList.h"
 #include "DumpStream.h"
 #include "FEDomain.h"
-#include "FEModel.h"
 #include "FEMesh.h"
 #include <assert.h>
 using namespace std;
@@ -43,6 +42,11 @@ FEDomainList::FEDomainList()
 FEDomainList::FEDomainList(FEDomainList& domList)
 {
 	m_dom = domList.m_dom;
+}
+
+FEDomainList::FEDomainList(std::vector<FEDomain*> domList)
+{
+	m_dom = domList;
 }
 
 //! Clear the domain list

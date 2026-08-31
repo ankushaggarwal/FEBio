@@ -31,7 +31,6 @@ SOFTWARE.*/
 #include <vector>
 #include "fecore_api.h"
 #include "mat3d.h"
-using namespace std;
 
 //-----------------------------------------------------------------------------
 //! General purpose matrix class.
@@ -81,7 +80,7 @@ public:
 	void zero() { memset(m_pd, 0, sizeof(double)*m_nsize); }
 
 	//! matrix transpose
-	matrix transpose();
+	matrix transpose() const;
 
 	//! matrix inversion
 	matrix inverse();
@@ -111,20 +110,26 @@ public:
 
 	// calculate the LU decomposition
 	// note that this modifies the matrix
-	void lufactor(vector<int>& indx);
+	void lufactor(std::vector<int>& indx);
 
 	// solve using the lu factor calculated with lufactor
-	void lusolve(vector<double>& b, vector<int>& indx);
+	void lusolve(std::vector<double>& b, std::vector<int>& indx);
 
 	// solve the linear system Ax=b
-	void solve(const vector<double>& b, vector<double>& x);
+	void solve(std::vector<double>& x, const std::vector<double>& b);
+
+	bool lsq_solve(std::vector<double>& x, std::vector<double>& b);
+
+	bool eigen_vectors(matrix& Eigen, std::vector<double>& eigen_values);
 
 	// infinity-norm
 	double inf_norm();
 
-    // find eigenvectors and eigenvalues
-    bool eigen_vectors(matrix& Eigen, vector<double>& eigen_values);
-    
+	void mult(std::vector<double>& x, std::vector<double>& y);
+    void mult(const matrix& m, std::vector<double>& x, std::vector<double>& y);
+	void mult_transpose(std::vector<double>& x, std::vector<double>& y);
+	void mult_transpose_self(matrix& AAt);
+
 public:
 	void set(int i, int j, const mat3d& a);
 	
@@ -146,6 +151,7 @@ public:
 	void sub(int i, int j, const mat3da& a);
 	void sub(int i, int j, const mat3dd& a);
 	void sub(int i, int j, const mat3d&  a);
+	void sub(int i, int j, const matrix& a);
 
 	void get(int i, int j, mat3d& a) const;
 
@@ -200,9 +206,9 @@ protected:
 	int	m_nsize;	// size of matrix (ie. total nr of elements = nr*nc)
 };
 
-vector<double> FECORE_API operator / (vector<double>& b, matrix& m);
-vector<double> FECORE_API operator * (matrix& m, vector<double>& b);
-matrix FECORE_API outer_product(vector<double>& a);
+std::vector<double> FECORE_API operator / (std::vector<double>& b, matrix& m);
+std::vector<double> FECORE_API operator * (matrix& m, std::vector<double>& b);
+matrix FECORE_API outer_product(std::vector<double>& a);
 
 inline void matrix::set(int i, int j, const mat3d& a)
 {
@@ -289,6 +295,15 @@ inline void matrix::sub(int i, int j, const mat3d& a)
 	m_pr[i][j] -= a(2,0); m_pr[i][j+1] -= a(2,1); m_pr[i][j+2] -= a(2,2);
 }
 
+inline void matrix::sub(int i, int j, const matrix& m)
+{
+	int mr = m.rows();
+	int mc = m.columns();
+	for (int r = 0; r < mr; ++r)
+		for (int c = 0; c < mc; ++c)
+			m_pr[i + r][j + c] -= m[r][c];
+}
+
 inline void matrix::get(int i, int j, mat3d& a) const
 {
 	a[0][0] = m_pr[i  ][j]; a[0][1] = m_pr[i  ][j+1]; a[0][2] = m_pr[i  ][j+2];
@@ -327,3 +342,8 @@ inline matrix& matrix::operator = (matrix&& m)
 
 	return *this;
 }
+
+// Calculate the covariance of a matrix. 
+// The rows represent the observations, and the columns represent random variables.
+// The returned covariance matrix is an ncol x ncol matrix.
+matrix FECORE_API covariance(const matrix& a);

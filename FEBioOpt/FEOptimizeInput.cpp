@@ -34,7 +34,9 @@ SOFTWARE.*/
 #include "FEConstrainedLMOptimizeMethod.h"
 #include "FEOptimizeInput.h"
 #include <FECore/log.h>
-#include <FEBioXML/XMLReader.h>
+#include <FECore/xmltool.h>
+#include <FECore/FELogElemMath.h>
+#include <FECore/FECoreKernel.h>
 
 //=============================================================================
 // FEOptimizeInput
@@ -67,15 +69,26 @@ bool FEOptimizeInput::Input(const char* szfile, FEOptimizeData* pOpt)
 
 	m_opt = pOpt;
 
-	// build the file section map
-	m_map["Options"    ] = new FEOptionsSection(pOpt, this);
-	m_map["Parameters" ] = new FEParametersSection(pOpt, this);
-	m_map["Constraints"] = new FEConstraintsSection(pOpt, this);
-	m_map["Objective"  ] = new FEObjectiveSection(pOpt, this);
-	m_map["Task"       ] = new FETaskSection(pOpt, this);
-
-	// parse the file
-	bool ret = ParseFile(tag);
+	// process the file
+	bool ret = true;
+	try {
+		++tag;
+		do
+		{
+			if      (tag == "Task"       ) ParseTask(tag);
+			else if (tag == "Options"    ) ParseOptions(tag);
+			else if (tag == "Parameters" ) ParseParameters(tag);
+			else if (tag == "Constraints") ParseConstraints(tag);
+			else if (tag == "Objective"  ) ParseObjective(tag);
+			else throw XMLReader::InvalidTag(tag);
+			++tag;
+		} while (!tag.isend());
+	}
+	catch (...)
+	{
+		fprintf(stderr, "Fatal exception while reading optimization input file.\n");
+		ret = false;
+	}
 
 	// all done
 	xml.Close();
@@ -83,22 +96,23 @@ bool FEOptimizeInput::Input(const char* szfile, FEOptimizeData* pOpt)
 	return ret;
 }
 
-//=================================================================================================
-void FEOptionsSection::Parse(XMLTag& tag)
+//-------------------------------------------------------------------------------------------------
+void FEOptimizeInput::ParseTask(XMLTag& tag)
 {
-	FEOptimizeMethod* popt = 0;
+	m_opt->m_pTask = fecore_new<FECoreTask>(tag.szvalue(), m_opt->GetFEModel());
+	if (m_opt->m_pTask == nullptr) throw XMLReader::InvalidValue(tag);
+}
+
+
+//-------------------------------------------------------------------------------------------------
+void FEOptimizeInput::ParseOptions(XMLTag& tag)
+{
+	FEModel* fem = m_opt->GetFEModel();
+
 	const char* szt = tag.AttributeValue("type", true);
-	if (szt == 0) popt = new FELMOptimizeMethod;
-	else
-	{
-		if (strcmp(szt, "levmar") == 0) popt = new FELMOptimizeMethod;
-		else if (strcmp(szt, "powell") == 0) popt = new FEPowellOptimizeMethod;
-		else if (strcmp(szt, "scan") == 0) popt = new FEScanOptimizeMethod;
-#ifdef HAVE_LEVMAR
-		else if (strcmp(szt, "constrained levmar") == 0) popt = new FEConstrainedLMOptimizeMethod;
-#endif
-		else throw XMLReader::InvalidAttributeValue(tag, "type", szt);
-	}
+	if (szt == 0) szt = "levmar";
+	FEOptimizeMethod* popt = fecore_new< FEOptimizeMethod>(szt, fem);
+	if (popt == nullptr) throw XMLReader::InvalidAttributeValue(tag, "type", szt);
 
 	// get the parameter list
 	FEParameterList& pl = popt->GetParameterList();
@@ -108,7 +122,7 @@ void FEOptionsSection::Parse(XMLTag& tag)
 		++tag;
 		do
 		{
-			if (ReadParameter(tag, pl) == false)
+			if (fexml::readParameter(tag, pl) == false)
 			{
 				if (tag == "log_level")
 				{
@@ -137,6 +151,10 @@ void FEOptionsSection::Parse(XMLTag& tag)
 						else throw XMLReader::InvalidValue(tag);
 					}
 				}
+				else if (tag == "write_report")
+				{
+					tag.value(m_opt->m_createReport);
+				}
 				else throw XMLReader::InvalidTag(tag);
 			}
 			++tag;
@@ -146,213 +164,19 @@ void FEOptionsSection::Parse(XMLTag& tag)
 	m_opt->SetSolver(popt);
 }
 
-//=================================================================================================
-void FETaskSection::Parse(XMLTag& tag)
-{
-	m_opt->m_pTask = fecore_new<FECoreTask>(tag.szvalue(), m_opt->GetFEModel());
-	if (m_opt->m_pTask == nullptr) throw XMLReader::InvalidValue(tag);
-}
 
-//=================================================================================================
-void FEObjectiveSection::Parse(XMLTag& tag)
+//-------------------------------------------------------------------------------------------------
+void FEOptimizeInput::ParseObjective(XMLTag& tag)
 {
 	FEModel& fem = *m_opt->GetFEModel();
 
 	// get the type attribute
 	const char* sztype = tag.AttributeValue("type");
 
-	if (strcmp(sztype, "data-fit") == 0)
-	{
-		FEDataFitObjective* obj = new FEDataFitObjective(&fem);
-		m_opt->SetObjective(obj);
-
-		++tag;
-		do
-		{
-			if (tag == "fnc")
-			{
-				FEDataSource* src = ParseDataSource(tag, *m_opt);
-				obj->SetDataSource(src);
-			}
-			else if (tag == "data")
-			{
-				vector<pair<double, double> > data;
-
-				// see if the user wants to read the data from a text file
-				const char* szf = tag.AttributeValue("import", true);
-				if (szf)
-				{
-					// make sure this tag is a leaf
-					if ((tag.isempty() == false) || (tag.isleaf() == false)) throw XMLReader::InvalidValue(tag);
-
-					// read the data form a text file
-					FILE* fp = fopen(szf, "rt");
-					if (fp == 0) throw XMLReader::InvalidAttributeValue(tag, "import", szf);
-					char szline[256] = { 0 };
-					do
-					{
-						fgets(szline, 255, fp);
-						double t, v;
-						int n = sscanf(szline, "%lg%lg", &t, &v);
-						if (n == 2)
-						{
-							pair<double, double> pt(t, v);
-							data.push_back(pt);
-						}
-						else break;
-					} while ((feof(fp) == 0) && (ferror(fp) == 0));
-
-					fclose(fp);
-				}
-				else
-				{
-					double v[2] = { 0 };
-					++tag;
-					do
-					{
-						tag.value(v, 2);
-						pair<double, double> p(v[0], v[1]);
-						data.push_back(p);
-						++tag;
-					} while (!tag.isend());
-				}
-
-				obj->SetMeasurements(data);
-			}
-			else throw XMLReader::InvalidTag(tag);
-
-			++tag;
-		} while (!tag.isend());
-	}
-	else if (strcmp(sztype, "target") == 0)
-	{
-		FEMinimizeObjective* obj = new FEMinimizeObjective(&fem);
-		m_opt->SetObjective(obj);
-
-		++tag;
-		do
-		{
-			if (tag == "var")
-			{
-				const char* szname = tag.AttributeValue("name");
-
-				double d[2] = { 0 };
-				tag.value(d, 2);
-
-				if (obj->AddFunction(szname, d[0]) == false) throw XMLReader::InvalidAttributeValue(tag, "name", szname);
-			}
-			else throw XMLReader::InvalidTag(tag);
-			++tag;
-		} while (!tag.isend());
-	}
-	else if (strcmp(sztype, "element-data") == 0)
-	{
-		FEElementDataTable* obj = new FEElementDataTable(&fem);
-		m_opt->SetObjective(obj);
-
-		++tag;
-		do
-		{
-			if (tag == "var")
-			{
-				const char* sztype = tag.AttributeValue("type");
-
-				// try to allocate the element data record
-				FELogElemData* var = fecore_new<FELogElemData>(sztype, &fem);
-				if (var == nullptr) throw XMLReader::InvalidAttributeValue(tag, "type", sztype);
-
-				obj->SetVariable(var);
-			}
-			else if (tag == "data")
-			{
-				++tag;
-				do
-				{
-					if (tag == "elem")
-					{
-						const char* szid = tag.AttributeValue("id");
-						int nid = atoi(szid);
-						double v = 0.0;
-						tag.value(v);
-
-						obj->AddValue(nid, v);
-					}
-					else throw XMLReader::InvalidTag(tag);
-
-					++tag;
-				}
-				while (!tag.isend());
-			}
-			++tag;
-		}
-		while (!tag.isend());
-	}
-	else if (strcmp(sztype, "node-data") == 0)
-	{
-		FENodeDataTable* obj = new FENodeDataTable(&fem);
-		m_opt->SetObjective(obj);
-
-		int nvars = 0;
-		++tag;
-		do
-		{
-			if (tag == "var")
-			{
-				const char* sztype = tag.AttributeValue("type");
-
-				char buf[256] = { 0 };
-				strcpy(buf, sztype);
-				char* ch = buf;
-				char* sz = buf;
-				while (*sz)
-				{
-					if ((*ch == 0) || (*ch == ';'))
-					{
-						char ch2 = *ch;
-						*ch = 0;
-						
-						// try to allocate the element data record
-						FENodeLogData* var = fecore_new<FENodeLogData>(sz, &fem);
-						if (var == nullptr) throw XMLReader::InvalidAttributeValue(tag, "type", sztype);
-
-						obj->AddVariable(var);
-						nvars++;
-
-						if (ch2 != 0) ch++;
-						sz = ch;
-					}
-					else ch++;
-				}
-			}
-			else if (tag == "data")
-			{
-				if (nvars == 0)
-				{
-					throw XMLReader::InvalidTag(tag);
-				}
-
-				++tag;
-				do
-				{
-					if (tag == "node")
-					{
-						const char* szid = tag.AttributeValue("id");
-						int nid = atoi(szid);
-						vector<double> v(nvars, 0.0);
-						int nread = tag.value(&v[0], nvars);
-						if (nread != nvars) throw XMLReader::InvalidValue(tag);
-						obj->AddValue(nid, v);
-					}
-					else throw XMLReader::InvalidTag(tag);
-
-					++tag;
-				}
-				while (!tag.isend());
-			}
-			++tag;
-		}
-		while (!tag.isend());
-	}
+	if      (strcmp(sztype, "data-fit"    ) == 0) ParseObjectiveDataFit(tag);
+	else if (strcmp(sztype, "target"      ) == 0) ParseObjectiveTarget(tag);
+	else if (strcmp(sztype, "element-data") == 0) ParseObjectiveElementData(tag);
+	else if (strcmp(sztype, "node-data"   ) == 0) ParseObjectiveNodeData(tag);
 	else throw XMLReader::InvalidAttributeValue(tag, "type", sztype);
 
 	FEOptimizeMethod* solver = m_opt->GetSolver();
@@ -364,9 +188,265 @@ void FEObjectiveSection::Parse(XMLTag& tag)
 	}
 }
 
-//-----------------------------------------------------------------------------
-FEDataSource* FEObjectiveSection::ParseDataSource(XMLTag& tag, FEOptimizeData& opt)
+void FEOptimizeInput::ParseObjectiveDataFit(XMLTag& tag)
 {
+	FEModel& fem = *m_opt->GetFEModel();
+	FEDataFitObjective* obj = new FEDataFitObjective(&fem);
+	m_opt->SetObjective(obj);
+
+	++tag;
+	do
+	{
+		if (tag == "fnc")
+		{
+			FEDataSource* src = ParseDataSource(tag);
+			obj->SetDataSource(src);
+		}
+		else if (tag == "data")
+		{
+			vector<pair<double, double> > data;
+
+			// see if the user wants to read the data from a text file
+			const char* szf = tag.AttributeValue("import", true);
+			if (szf)
+			{
+				// make sure this tag is a leaf
+				if ((tag.isempty() == false) || (tag.isleaf() == false)) throw XMLReader::InvalidValue(tag);
+
+				// read the data form a text file
+				FILE* fp = fopen(szf, "rt");
+				if (fp == 0) throw XMLReader::InvalidAttributeValue(tag, "import", szf);
+				char szline[256] = { 0 };
+				do
+				{
+					fgets(szline, 255, fp);
+					double t, v;
+					int n = sscanf(szline, "%lg%lg", &t, &v);
+					if (n == 2)
+					{
+						pair<double, double> pt(t, v);
+						data.push_back(pt);
+					}
+					else break;
+				} while ((feof(fp) == 0) && (ferror(fp) == 0));
+
+				fclose(fp);
+			}
+			else
+			{
+				double v[2] = { 0 };
+				++tag;
+				do
+				{
+					tag.value(v, 2);
+					pair<double, double> p(v[0], v[1]);
+					data.push_back(p);
+					++tag;
+				} while (!tag.isend());
+			}
+
+			obj->SetMeasurements(data);
+		}
+		else throw XMLReader::InvalidTag(tag);
+
+		++tag;
+	} while (!tag.isend());
+}
+
+void FEOptimizeInput::ParseObjectiveTarget(XMLTag& tag)
+{
+	FEModel& fem = *m_opt->GetFEModel();
+	FEMinimizeObjective* obj = new FEMinimizeObjective(&fem);
+	m_opt->SetObjective(obj);
+
+	++tag;
+	do
+	{
+		if (tag == "var")
+		{
+			const char* szname = tag.AttributeValue("name");
+			double trg;
+			tag.value(trg);
+			obj->AddFunction(new FEMinimizeObjective::ParamFunction(&fem, szname, trg));
+		}
+		else if (tag == "fnc")
+		{
+			const char* sztype = tag.AttributeValue("type");
+			if (strcmp(sztype, "filter_avg") == 0)
+			{
+				FEElementSet* elset = nullptr;
+				FELogElemData* pdata = nullptr;
+				double target = 0;
+				++tag;
+				do
+				{
+					if (tag == "elem_data")
+					{
+						const char* szdata = tag.AttributeValue("data");
+						const char* szset = tag.AttributeValue("elem_set");
+
+						FEMesh& mesh = fem.GetMesh();
+						elset = mesh.FindElementSet(szset);
+						if (elset == nullptr) throw XMLReader::InvalidAttributeValue(tag, "elem_set");
+
+						// try to allocate the element data record
+						if (szdata && (szdata[0] == '='))
+						{
+							FELogElemMath* logMath = fecore_alloc(FELogElemMath, &fem);
+							if (logMath)
+							{
+								string smath(szdata + 1);
+								if (logMath->SetExpression(smath))
+								{
+									pdata = logMath;
+								}
+							}
+						}
+						else
+							pdata = fecore_new<FELogElemData>(szdata, &fem);
+
+						if (pdata == nullptr) throw XMLReader::InvalidAttributeValue(tag, "data");
+					}
+					else if (tag == "target") tag.value(target);
+					++tag;
+				} while (!tag.isend());
+
+				obj->AddFunction(new FEMinimizeObjective::FilterAvgFunction(&fem, pdata, elset, target));
+			}
+			else throw XMLReader::InvalidAttributeValue(tag, "type");
+		}
+		else throw XMLReader::InvalidTag(tag);
+		++tag;
+	} while (!tag.isend());
+}
+
+void FEOptimizeInput::ParseObjectiveElementData(XMLTag& tag)
+{
+	FEModel& fem = *m_opt->GetFEModel();
+	FEElementDataTable* obj = new FEElementDataTable(&fem);
+	m_opt->SetObjective(obj);
+
+	++tag;
+	do
+	{
+		if (tag == "var")
+		{
+			const char* sztype = tag.AttributeValue("type");
+
+			// try to allocate the element data record
+			FELogElemData* var = nullptr;
+			if (sztype && (sztype[0]=='='))
+			{
+				FELogElemMath* logMath = fecore_alloc(FELogElemMath, &fem);
+				if (logMath)
+				{
+					string smath(sztype + 1);
+					if (logMath->SetExpression(smath))
+					{
+						var = logMath;
+					}
+				}
+			}
+			else
+				var = fecore_new<FELogElemData>(sztype, &fem);
+
+			if (var == nullptr) throw XMLReader::InvalidAttributeValue(tag, "type", sztype);
+
+			obj->SetVariable(var);
+		}
+		else if (tag == "data")
+		{
+			++tag;
+			do
+			{
+				if (tag == "elem")
+				{
+					const char* szid = tag.AttributeValue("id");
+					int nid = atoi(szid);
+					double v = 0.0;
+					tag.value(v);
+
+					obj->AddValue(nid, v);
+				}
+				else throw XMLReader::InvalidTag(tag);
+
+				++tag;
+			} while (!tag.isend());
+		}
+		++tag;
+	} while (!tag.isend());
+}
+
+void FEOptimizeInput::ParseObjectiveNodeData(XMLTag& tag)
+{
+	FEModel& fem = *m_opt->GetFEModel();
+	FENodeDataTable* obj = new FENodeDataTable(&fem);
+	m_opt->SetObjective(obj);
+
+	int nvars = 0;
+	++tag;
+	do
+	{
+		if (tag == "var")
+		{
+			const char* sztype = tag.AttributeValue("type");
+
+			char buf[256] = { 0 };
+			strcpy(buf, sztype);
+			char* ch = buf;
+			char* sz = buf;
+			while (*sz)
+			{
+				if ((*ch == 0) || (*ch == ';'))
+				{
+					char ch2 = *ch;
+					*ch = 0;
+
+					// try to allocate the element data record
+					FELogNodeData* var = fecore_new<FELogNodeData>(sz, &fem);
+					if (var == nullptr) throw XMLReader::InvalidAttributeValue(tag, "type", sztype);
+
+					obj->AddVariable(var);
+					nvars++;
+
+					if (ch2 != 0) ch++;
+					sz = ch;
+				}
+				else ch++;
+			}
+		}
+		else if (tag == "data")
+		{
+			if (nvars == 0)
+			{
+				throw XMLReader::InvalidTag(tag);
+			}
+
+			++tag;
+			do
+			{
+				if (tag == "node")
+				{
+					const char* szid = tag.AttributeValue("id");
+					int nid = atoi(szid);
+					vector<double> v(nvars, 0.0);
+					int nread = tag.value(&v[0], nvars);
+					if (nread != nvars) throw XMLReader::InvalidValue(tag);
+					obj->AddValue(nid, v);
+				}
+				else throw XMLReader::InvalidTag(tag);
+
+				++tag;
+			} while (!tag.isend());
+		}
+		++tag;
+	} while (!tag.isend());
+}
+
+FEDataSource* FEOptimizeInput::ParseDataSource(XMLTag& tag)
+{
+	FEOptimizeData& opt = *m_opt;
+
 	FEModel& fem = *opt.GetFEModel();
 	FEMesh& mesh = fem.GetMesh();
 
@@ -402,7 +482,7 @@ FEDataSource* FEObjectiveSection::ParseDataSource(XMLTag& tag, FEOptimizeData& o
 		{
 			if (tag == "source")
 			{
-				FEDataSource* s = ParseDataSource(tag, opt);
+				FEDataSource* s = ParseDataSource(tag);
 				src->SetDataSource(s);
 			}
 			else throw XMLReader::InvalidTag(tag);
@@ -413,7 +493,7 @@ FEDataSource* FEObjectiveSection::ParseDataSource(XMLTag& tag, FEOptimizeData& o
 	}
 	else if (strcmp(sztype, "filter_sum") == 0)
 	{
-		FEDataFilterSum* flt = new FEDataFilterSum(&fem);
+		FEDataSource* flt = nullptr;
 
 		++tag;
 		do
@@ -426,10 +506,42 @@ FEDataSource* FEObjectiveSection::ParseDataSource(XMLTag& tag, FEOptimizeData& o
 				FENodeSet* nodeSet = mesh.FindNodeSet(szset);
 				if (nodeSet == nullptr) throw XMLReader::InvalidAttributeValue(tag, "node_set", szset);
 
-				FENodeLogData* nodeData = fecore_new<FENodeLogData>(szdata, &fem);
+				FELogNodeData* nodeData = fecore_new<FELogNodeData>(szdata, &fem);
 				if (nodeData == nullptr) throw XMLReader::InvalidAttributeValue(tag, "data", szdata);
 
-				flt->SetData(nodeData, nodeSet);
+				FENodeDataFilterSum* dataFlt = new FENodeDataFilterSum(&fem);
+				dataFlt->SetData(nodeData, nodeSet);
+				flt = dataFlt;
+			}
+			else if (tag == "element_data")
+			{
+				const char* szdata = tag.AttributeValue("data");
+				const char* szset = tag.AttributeValue("elem_set");
+
+				FEElementSet* elemSet = mesh.FindElementSet(szset);
+				if (elemSet == nullptr) throw XMLReader::InvalidAttributeValue(tag, "elem_set", szset);
+
+				FELogElemData* elemData = nullptr;
+				if (szdata && (szdata[0] == '='))
+				{
+					FELogElemMath* logMath = fecore_alloc(FELogElemMath, &fem);
+					if (logMath)
+					{
+						string smath(szdata + 1);
+						if (logMath->SetExpression(smath))
+						{
+							elemData = logMath;
+						}
+					}
+				}
+				else
+					elemData = fecore_new<FELogElemData>(szdata, &fem);
+
+				if (elemData == nullptr) throw XMLReader::InvalidAttributeValue(tag, "data", szdata);
+
+				FEElemDataFilterSum* dataFlt = new FEElemDataFilterSum(&fem);
+				dataFlt->SetData(elemData, elemSet);
+				flt = dataFlt;
 			}
 			++tag;
 		}
@@ -444,8 +556,8 @@ FEDataSource* FEObjectiveSection::ParseDataSource(XMLTag& tag, FEOptimizeData& o
 	return 0;
 }
 
-//=============================================================================
-void FEParametersSection::Parse(XMLTag& tag)
+//-------------------------------------------------------------------------------------------------
+void FEOptimizeInput::ParseParameters(XMLTag& tag)
 {
 	FEModel& fem = *m_opt->GetFEModel();
 
@@ -478,8 +590,8 @@ void FEParametersSection::Parse(XMLTag& tag)
 	} while (!tag.isend());
 }
 
-//=============================================================================
-void FEConstraintsSection::Parse(XMLTag& tag)
+//-------------------------------------------------------------------------------------------------
+void FEOptimizeInput::ParseConstraints(XMLTag& tag)
 {
 	int NP = m_opt->InputParameters();
 	if ((NP > OPT_MAX_VAR) || (NP < 2)) throw XMLReader::InvalidTag(tag);

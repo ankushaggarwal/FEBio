@@ -52,7 +52,7 @@ public:
 class FEBIOMECH_API FELinearSpring : public FESpringMaterial
 {
 public:
-	FELinearSpring(FEModel* pfem) : FESpringMaterial(pfem){}
+	FELinearSpring(FEModel* pfem);
 	double force    (double dl) override;
 	double stiffness(double dl) override;
 	double strainEnergy(double dl) override;
@@ -75,7 +75,7 @@ public:
 	double strainEnergy(double dl) override;
 
 public:
-	double m_E;	//!< spring constant
+	double m_E = 0; //!< spring constant
 
 	// declare the parameter list
 	DECLARE_FECORE_CLASS();

@@ -47,9 +47,6 @@ public:
 	void Serialize(DumpStream& ar);
 
 public:
-	double Volume();
-
-public:
 	double	m_Lp;	//!< Lagrange multipler pressure
 	double	m_p;	//!< applied pressure (= Lp + eps*DV)
 	double	m_V0;	//!< Initial volume
@@ -64,6 +61,8 @@ class FEVolumeConstraint : public FESurfaceConstraint
 public:
 	//! constructor
 	FEVolumeConstraint(FEModel* pfem);
+
+	~FEVolumeConstraint();
 
 	void Activate() override;
 	void LoadVector(FEGlobalVector& R, const FETimeInfo& tp) override;
@@ -86,7 +85,9 @@ public:
 	FESurface* GetSurface() override;
 
 public:
-	FEVolumeSurface m_s;	//!< the bounding surface
+	double EnclosedVolume() const;
+
+	double Pressure() const;
 
 public:
 	double	m_eps;		//!< penalty parameter
@@ -102,6 +103,8 @@ private:
 	int	m_dofX;
 	int	m_dofY;
 	int	m_dofZ;
+
+	FEVolumeSurface* m_s;	//!< the bounding surface
 
 	DECLARE_FECORE_CLASS();
 };

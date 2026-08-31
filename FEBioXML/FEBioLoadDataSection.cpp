@@ -30,7 +30,6 @@ SOFTWARE.*/
 #include "FEBioLoadDataSection.h"
 #include <FECore/FEModel.h>
 #include <FECore/FELoadCurve.h>
-#include <FECore/FEPointFunction.h>
 
 //-----------------------------------------------------------------------------
 FEBioLoadDataSection::FEBioLoadDataSection(FEFileImport* pim) : FEFileSection(pim) 
@@ -55,20 +54,22 @@ void FEBioLoadDataSection::Parse(XMLTag& tag)
 			tag.AttributeValue("id", nid);
 
 			// default type and extend mode
-			FEPointFunction::INTFUNC ntype = FEPointFunction::LINEAR;
-			FEPointFunction::EXTMODE nextm = FEPointFunction::CONSTANT;
+			PointCurve::INTFUNC ntype = PointCurve::LINEAR;
+			PointCurve::EXTMODE nextm = PointCurve::CONSTANT;
 
 			// get the (optional) type
 			XMLAtt* patt = tag.Attribute("type", true);
 			if (patt)
 			{
 				XMLAtt& type = *patt;
-				if      (type == "step"  ) ntype = FEPointFunction::STEP;
-				else if (type == "linear") ntype = FEPointFunction::LINEAR;
-				else if (type == "smooth") ntype = FEPointFunction::SMOOTH;
-                else if (type == "cubic spline") ntype = FEPointFunction::CSPLINE;
-                else if (type == "control points") ntype = FEPointFunction::CPOINTS;
-                else if (type == "approximation" ) ntype = FEPointFunction::APPROX;
+				if      (type == "step"  ) ntype = PointCurve::STEP;
+				else if (type == "linear") ntype = PointCurve::LINEAR;
+				else if (type == "smooth") ntype = PointCurve::SMOOTH;
+                else if (type == "cubic spline") ntype = PointCurve::CSPLINE;
+                else if (type == "control points") ntype = PointCurve::CPOINTS;
+                else if (type == "approximation" ) ntype = PointCurve::APPROX;
+                else if (type == "smooth step"   ) ntype = PointCurve::SMOOTH_STEP;
+                else if (type == "C2-smooth" ) ntype = PointCurve::C2SMOOTH;
 				else throw XMLReader::InvalidAttributeValue(tag, "type", type.cvalue());
 			}
 
@@ -77,10 +78,10 @@ void FEBioLoadDataSection::Parse(XMLTag& tag)
 			if (patt)
 			{
 				XMLAtt& ext = *patt;
-				if      (ext == "constant"     ) nextm = FEPointFunction::CONSTANT;
-				else if (ext == "extrapolate"  ) nextm = FEPointFunction::EXTRAPOLATE;
-				else if (ext == "repeat"       ) nextm = FEPointFunction::REPEAT;
-				else if (ext == "repeat offset") nextm = FEPointFunction::REPEAT_OFFSET;
+				if      (ext == "constant"     ) nextm = PointCurve::CONSTANT;
+				else if (ext == "extrapolate"  ) nextm = PointCurve::EXTRAPOLATE;
+				else if (ext == "repeat"       ) nextm = PointCurve::REPEAT;
+				else if (ext == "repeat offset") nextm = PointCurve::REPEAT_OFFSET;
 				else throw XMLReader::InvalidAttributeValue(tag, "extend", ext.cvalue());
 			}
 
@@ -132,6 +133,11 @@ void FEBioLoadDataSection::Parse(XMLTag& tag)
 				++tag;
 			}
 			while (!tag.isend());
+
+			if (m_redefineCurves)
+			{
+				plc->Init();
+			}
 		}
 		else throw XMLReader::InvalidTag(tag);
 

@@ -26,6 +26,7 @@ SOFTWARE.*/
 #include "FELeastSquaresInterpolator.h"
 #include <FECore/FENNQuery.h>
 #include <algorithm>
+using namespace std;
 
 class KDTree
 {
@@ -35,6 +36,12 @@ public:
 		m_parent = nullptr;
 		m_left = nullptr;
 		m_right = nullptr;
+	}
+
+	~KDTree()
+	{
+		delete m_left;
+		delete m_right;
 	}
 
 	void build(vector<vec3d> pts, int depth = 0)

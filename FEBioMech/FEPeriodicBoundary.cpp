@@ -25,9 +25,24 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #include "stdafx.h"
 #include "FEPeriodicBoundary.h"
+#include <FECore/FEMesh.h>
+#include <FECore/FENormalProjection.h>
+#include <FECore/FELinearSystem.h>
+#include <FECore/log.h>
 
 FEPeriodicSurface::Data::Data()
 {
+	m_gap = vec3d(0, 0, 0);
+	m_rs = vec2d(0, 0);
+	m_Lm = vec3d(0, 0, 0);
+	m_Tn = vec3d(0, 0, 0);
+	m_Fr = vec3d(0, 0, 0);
+}
+
+void FEPeriodicSurface::Data::Init()
+{
+	FEContactMaterialPoint::Init();
+
 	m_gap = vec3d(0, 0, 0);
 	m_rs = vec2d(0, 0);
 	m_Lm = vec3d(0, 0, 0);
@@ -45,15 +60,10 @@ void FEPeriodicSurface::Data::Serialize(DumpStream& ar)
 	ar & m_Fr;
 }
 
-#include "stdafx.h"
-#include "FEPeriodicBoundary.h"
-#include <FECore/FENormalProjection.h>
-#include <FECore/FELinearSystem.h>
-#include <FECore/log.h>
-
 //-----------------------------------------------------------------------------
 // Define sliding interface parameters
 BEGIN_FECORE_CLASS(FEPeriodicBoundary, FEContactInterface)
+	ADD_PARAMETER(m_laugon   , "laugon")->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0");
 	ADD_PARAMETER(m_atol     , "tolerance");
 	ADD_PARAMETER(m_eps      , "penalty"  );
 	ADD_PARAMETER(m_btwo_pass, "two_pass" );
@@ -152,7 +162,6 @@ FEPeriodicBoundary::FEPeriodicBoundary(FEModel* pfem) : FEContactInterface(pfem)
 	SetID(count++);
 
 	m_stol = 0.01;
-	m_srad = 1.0;
 	m_atol = 0;
 	m_eps = 0;
 	m_btwo_pass = false;
@@ -208,15 +217,15 @@ void FEPeriodicBoundary::CopyFrom(FESurfacePairConstraint* pci)
 void FEPeriodicBoundary::BuildMatrixProfile(FEGlobalMatrix& K)
 {
 	FEModel& fem = *GetFEModel();
-	FEMesh& mesh = fem.GetMesh();
+	FEMesh& mesh = GetMesh();
 
 	// get the DOFS
-	const int dof_X = fem.GetDOFIndex("x");
-	const int dof_Y = fem.GetDOFIndex("y");
-	const int dof_Z = fem.GetDOFIndex("z");
-	const int dof_RU = fem.GetDOFIndex("Ru");
-	const int dof_RV = fem.GetDOFIndex("Rv");
-	const int dof_RW = fem.GetDOFIndex("Rw");
+	const int dof_X = GetDOFIndex("x");
+	const int dof_Y = GetDOFIndex("y");
+	const int dof_Z = GetDOFIndex("z");
+	const int dof_RU = GetDOFIndex("Ru");
+	const int dof_RV = GetDOFIndex("Rv");
+	const int dof_RW = GetDOFIndex("Rw");
 
 	vector<int> lm(6*5);
 
@@ -276,12 +285,13 @@ void FEPeriodicBoundary::ProjectSurface(FEPeriodicSurface& ss, FEPeriodicSurface
 
 	// unit vector in direction of cr
 	// this will serve as the projection distance
-	vec3d cn(cr); cn.unit();
+	vec3d cn(cr); 
+	double D = cn.unit();
 
 	// initialize projection data
 	FENormalProjection np(ms);
 	np.SetTolerance(m_stol);
-	np.SetSearchRadius(m_srad);
+	np.SetSearchRadius(1.1*D);
 	np.Init();
 
 	// loop over all primary nodes
@@ -408,8 +418,8 @@ void FEPeriodicBoundary::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 
 			for (int i=0; i<nseln; ++i)
 			{
-				r0[i] = ss.GetMesh()->Node(sel.m_node[i]).m_r0;
-				rt[i] = ss.GetMesh()->Node(sel.m_node[i]).m_rt;
+				r0[i] = ss.Node(sel.m_lnode[i]).m_r0;
+				rt[i] = ss.Node(sel.m_lnode[i]).m_rt;
 			}
 			w = sel.GaussWeights();
 
@@ -565,8 +575,8 @@ void FEPeriodicBoundary::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& t
 
 			for (int i=0; i<nseln; ++i)
 			{
-				r0[i] = ss.GetMesh()->Node(se.m_node[i]).m_r0;
-				rt[i] = ss.GetMesh()->Node(se.m_node[i]).m_rt;
+				r0[i] = ss.Node(se.m_lnode[i]).m_r0;
+				rt[i] = ss.Node(se.m_lnode[i]).m_rt;
 			}
 
 			w = se.GaussWeights();
@@ -601,7 +611,7 @@ void FEPeriodicBoundary::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& t
 				nmeln = me.Nodes();
 
 				// get the secondary element node positions
-				for (k=0; k<nmeln; ++k) rtm[k] = ms.GetMesh()->Node(me.m_node[k]).m_rt;
+				for (k=0; k<nmeln; ++k) rtm[k] = ms.Node(me.m_lnode[k]).m_rt;
 
 				// primary node natural coordinates in secondary element
 				r = ss.m_data[m].m_rs[0];
@@ -687,7 +697,7 @@ void FEPeriodicBoundary::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& t
 bool FEPeriodicBoundary::Augment(int naug, const FETimeInfo& tp)
 {
 	// make sure we need to augment
-	if (m_laugon != 1) return true;
+	if (m_laugon != FECore::AUGLAG_METHOD) return true;
 
 	int i;
 

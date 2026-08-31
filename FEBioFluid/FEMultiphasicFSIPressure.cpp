@@ -10,6 +10,7 @@
 #include "FEMultiphasicFSIPressure.h"
 #include "FEMultiphasicFSI.h"
 #include "FEBioMultiphasicFSI.h"
+#include <FECore/FEModel.h>
 
 //=============================================================================
 BEGIN_FECORE_CLASS(FEMultiphasicFSIPressure, FESurfaceLoad)
@@ -21,12 +22,11 @@ END_FECORE_CLASS();
 FEMultiphasicFSIPressure::FEMultiphasicFSIPressure(FEModel* pfem) : FESurfaceLoad(pfem)
 {
     m_pfs = nullptr;
-    m_alpha = 1.0;
     m_p = 0;
     
     
-    m_dofEF = pfem->GetDOFIndex(FEBioMultiphasicFSI::GetVariableName(FEBioMultiphasicFSI::FLUID_DILATATION), 0);
-    m_dofC = pfem->GetDOFIndex(FEBioMultiphasicFSI::GetVariableName(FEBioMultiphasicFSI::FLUID_CONCENTRATION), 0);
+    m_dofEF = (pfem ? pfem->GetDOFIndex(FEBioMultiphasicFSI::GetVariableName(FEBioMultiphasicFSI::FLUID_DILATATION   ), 0) : -1);
+    m_dofC  = (pfem ? pfem->GetDOFIndex(FEBioMultiphasicFSI::GetVariableName(FEBioMultiphasicFSI::FLUID_CONCENTRATION), 0) : -1);
     
     m_dof.Clear();
     m_dof.AddDof(m_dofEF);
@@ -42,7 +42,7 @@ bool FEMultiphasicFSIPressure::Init()
     // get fluid from first surface element
     // assuming the entire surface bounds the same fluid
     FESurfaceElement& el = m_psurf->Element(0);
-    FEElement* pe = el.m_elem[0];
+    FEElement* pe = el.m_elem[0].pe;
     if (pe == nullptr) return false;
     
     // get the material
@@ -65,6 +65,8 @@ void FEMultiphasicFSIPressure::Activate()
         // mark node as having prescribed DOF
         node.set_bc(m_dofEF, DOF_PRESCRIBED);
     }
+    
+    FESurfaceLoad::Activate();
 }
 
 //-----------------------------------------------------------------------------
@@ -96,7 +98,7 @@ void FEMultiphasicFSIPressure::Update()
     for (int i=0; i<ps->Elements(); ++i)
     {
         FESurfaceElement& el = ps->Element(i);
-        FEElement* e = el.m_elem[0];
+        FEElement* e = el.m_elem[0].pe;
         FESolidElement* se = dynamic_cast<FESolidElement*>(e);
         if (se) {
             double osci[FEElement::MAX_INTPOINTS];
@@ -156,12 +158,12 @@ void FEMultiphasicFSIPressure::Update()
             ca /= caNodes[node.GetID()].size();
             osc /= caNodes[node.GetID()].size();
             
-            double c = osc*ca*R;
+            double pc = R*T*osc*ca;
             
             //get correct ef for desired pressure
             double e = 0;
             bool good = false;
-            good = m_pfs->Fluid()->Dilatation(T, m_p, c, e);
+            good = m_pfs->Fluid()->Dilatation(0, m_p - pc, e);
             assert(good);
             
             // set node as having prescribed DOF
@@ -196,9 +198,8 @@ void FEMultiphasicFSIPressure::Update()
 
 //-----------------------------------------------------------------------------
 //! calculate residual
-void FEMultiphasicFSIPressure::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
+void FEMultiphasicFSIPressure::LoadVector(FEGlobalVector& R)
 {
-    m_alpha = tp.alpha; m_alphaf = tp.alphaf;
 }
 
 //-----------------------------------------------------------------------------
@@ -206,7 +207,7 @@ void FEMultiphasicFSIPressure::LoadVector(FEGlobalVector& R, const FETimeInfo& t
 void FEMultiphasicFSIPressure::Serialize(DumpStream& ar)
 {
     FESurfaceLoad::Serialize(ar);
-    ar & m_alpha & m_alphaf;
+    if (ar.IsShallow()) return;
     ar & m_pfs;
     ar & m_dofC;
     ar & m_dofEF;

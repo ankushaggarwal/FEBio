@@ -43,7 +43,7 @@ FEFluidPressureLoad::FEFluidPressureLoad(FEModel* pfem) : FESurfaceLoad(pfem)
     m_pfluid = nullptr;
     m_p0 = 0;
     
-    m_dofEF = pfem->GetDOFIndex(FEBioFluid::GetVariableName(FEBioFluid::FLUID_DILATATION), 0);
+    m_dofEF = (pfem ? pfem->GetDOFIndex(FEBioFluid::GetVariableName(FEBioFluid::FLUID_DILATATION), 0) : -1);
     
     m_dof.Clear();
     m_dof.AddDof(m_dofEF);
@@ -57,7 +57,7 @@ bool FEFluidPressureLoad::Init()
     // get fluid from first surface element
     // assuming the entire surface bounds the same fluid
     FESurfaceElement& el = m_psurf->Element(0);
-    FEElement* pe = el.m_elem[0];
+    FEElement* pe = el.m_elem[0].pe;
     if (pe == nullptr) return false;
     
     // get the material
@@ -80,6 +80,8 @@ void FEFluidPressureLoad::Activate()
         // mark node as having prescribed DOF
         node.set_bc(m_dofEF, DOF_PRESCRIBED);
     }
+    
+    FESurfaceLoad::Activate();
 }
 
 //-----------------------------------------------------------------------------
@@ -96,7 +98,7 @@ void FEFluidPressureLoad::Update()
             FENode& node = ps->Node(i);
             // calculate the dilatation
             double e = node.get(m_dofEF);
-            bool good = m_pfluid->Dilatation(0,m_p0,0,e);
+            bool good = m_pfluid->Dilatation(0,m_p0,e);
             assert(good);
             // set node as having prescribed DOF
             node.set(m_dofEF, e);
@@ -111,5 +113,7 @@ void FEFluidPressureLoad::Update()
 void FEFluidPressureLoad::Serialize(DumpStream& ar)
 {
     FESurfaceLoad::Serialize(ar);
+    if (ar.IsShallow()) return;
+    ar & m_dofEF;
     ar & m_pfluid;
 }

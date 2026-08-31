@@ -32,12 +32,6 @@ SOFTWARE.*/
 
 class FEBIOMECH_API FEPrescribedNormalDisplacement : public FEPrescribedSurface
 {
-	struct NODE
-	{
-		int		nodeId;		// node ID
-		vec3d	normal;		// initial normal at node
-	};
-
 public:
 	// constructor
 	FEPrescribedNormalDisplacement(FEModel* fem);
@@ -52,11 +46,10 @@ public:
 	// copy data from another class
 	void CopyFrom(FEBoundaryCondition* pbc) override;
 
-	// set the dof list
-	bool SetDofList(FEDofList& dofs) override;
+	void Serialize(DumpStream& ar) override;
 
 private:
-	vector<NODE>	m_node;
+	vector<vec3d>	m_normals;
 	double	m_scale;
 
 	// hint parameter helps to identify the surface geometry

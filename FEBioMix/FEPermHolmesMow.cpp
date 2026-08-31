@@ -32,7 +32,7 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEPermHolmesMow, FEHydraulicPermeability)
-	ADD_PARAMETER(m_perm , FE_RANGE_GREATER_OR_EQUAL(0.0), "perm" );
+	ADD_PARAMETER(m_perm , FE_RANGE_GREATER_OR_EQUAL(0.0), "perm" )->setUnits(UNIT_PERMEABILITY);
 	ADD_PARAMETER(m_M    , FE_RANGE_GREATER_OR_EQUAL(0.0), "M"    );
 	ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha");
 END_FECORE_CLASS();
@@ -46,53 +46,76 @@ FEPermHolmesMow::FEPermHolmesMow(FEModel* pfem) : FEHydraulicPermeability(pfem)
 }
 
 //-----------------------------------------------------------------------------
+bool FEPermHolmesMow::Init()
+{
+	// make sure the ancestor implements the biphasic interface
+	FEBiphasicInterface* pbm = dynamic_cast<FEBiphasicInterface*>(GetAncestor());
+	if (pbm == nullptr)
+	{
+		feLogError("Parent material needs to be biphasic or multiphasic.");
+		return false;
+	}
+
+	return FEHydraulicPermeability::Init();
+}
+
+//-----------------------------------------------------------------------------
 //! Permeability tensor.
 mat3ds FEPermHolmesMow::Permeability(FEMaterialPoint& mp)
 {
+	FEBiphasicInterface* pbm = dynamic_cast<FEBiphasicInterface*>(GetAncestor());
 	FEElasticMaterialPoint& et = *mp.ExtractData<FEElasticMaterialPoint>();
-	FEBiphasicMaterialPoint* pt = mp.ExtractData<FEBiphasicMaterialPoint>();
-    FEBiphasicFSIMaterialPoint* bpt = mp.ExtractData<FEBiphasicFSIMaterialPoint>();
     
 	// relative volume
 	double J = et.m_J;
+
 	// referential solid volume fraction also check if bfsi
-    double phi0 = 0.0;
-    if (pt)
-        phi0 = pt->m_phi0t;
-    else if (bpt)
-        phi0 = bpt->m_phi0;
+    double phi0 = pbm->GetReferentialSolidVolumeFraction(mp);
 	
     // check for potential error
-    if (J <= phi0) feLogError("The Holmes-Mow permeability calculation failed!\nThe volume ratio (J=%g) dropped below its theoretical minimum phi0=%g.",J,phi0);
-    
-	// --- strain-dependent isotropic permeability ---
-	
-	return mat3dd(m_perm*pow((J-phi0)/(1.0-phi0),m_alpha)*exp(m_M*(J*J-1.0)/2.0));
+    if (J <= phi0) 
+	{
+		FEElement* pe = mp.m_elem;
+		int id = (pe ? pe->GetID() : -1);
+		// NOTE: This function can be called from a parallel (omp) section
+		//       however, logging should be done in serial. 
+#pragma omp critical
+		feLogError("The Holmes-Mow permeability calculation failed!\nThe volume ratio (J=%g) dropped below its theoretical minimum phi0=%g. (element %d)", J, phi0, id);
+	}
+
+    // --- strain-dependent isotropic permeability ---
+	double perm = m_perm(mp);
+	return mat3dd(perm*pow((J-phi0)/(1.0-phi0),m_alpha)*exp(m_M*(J*J-1.0)/2.0));
 }
 
 //-----------------------------------------------------------------------------
 //! Tangent of permeability
 tens4dmm FEPermHolmesMow::Tangent_Permeability_Strain(FEMaterialPoint &mp)
 {
+	FEBiphasicInterface* pbm = dynamic_cast<FEBiphasicInterface*>(GetAncestor());
 	FEElasticMaterialPoint& et = *mp.ExtractData<FEElasticMaterialPoint>();
-	FEBiphasicMaterialPoint* pt = mp.ExtractData<FEBiphasicMaterialPoint>();
-    FEBiphasicFSIMaterialPoint* bpt = mp.ExtractData<FEBiphasicFSIMaterialPoint>();
 	
 	// relative volume
 	double J = et.m_J;
+
 	// referential solid volume fraction
-    double phi0 = 0.0;
-    if (pt)
-        phi0 = pt->m_phi0t;
-    else if (bpt)
-        phi0 = bpt->m_phi0;
-	
+	double phi0 = pbm->GetReferentialSolidVolumeFraction(mp);
+
     // check for potential error
-    if (J <= phi0) feLogError("The Holmes-Mow permeability calculation failed!\nThe volume ratio (J=%g) dropped below its theoretical minimum phi0=%g.",J,phi0);
-    
+	if (J <= phi0)
+	{
+		FEElement* pe = mp.m_elem;
+		int id = (pe ? pe->GetID() : -1);
+		// NOTE: This function can be called from a parallel (omp) section
+		//       however, logging should be done in serial. 
+#pragma omp critical
+		feLogError("The Holmes-Mow permeability calculation failed!\nThe volume ratio (J=%g) dropped below its theoretical minimum phi0=%g. (element %d)", J, phi0, id);
+	}
+
 	mat3dd I(1);	// Identity
-	
-	double k0 = m_perm*pow((J-phi0)/(1.0-phi0),m_alpha)*exp(m_M*(J*J-1.0)/2.0);
+	double perm = m_perm(mp);
+
+	double k0 = perm*pow((J-phi0)/(1.0-phi0),m_alpha)*exp(m_M*(J*J-1.0)/2.0);
 	double K0prime = (J*J*m_M+(J*(m_alpha+1)-phi0)/(J-phi0))*k0;
 	mat3ds k0hat = I*K0prime;
 	

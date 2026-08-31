@@ -28,16 +28,17 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FEDataMathGenerator.h"
+#include "FENodeDataMap.h"
 #include "MathObject.h"
 #include "MObjBuilder.h"
 #include "FEMesh.h"
 using namespace std;
 
-BEGIN_FECORE_CLASS(FEDataMathGenerator, FEDataGenerator)
+BEGIN_FECORE_CLASS(FEDataMathGenerator, FENodeDataGenerator)
 	ADD_PARAMETER(m_math, "math");
 END_FECORE_CLASS();
 
-FEDataMathGenerator::FEDataMathGenerator(FEModel* fem) : FEDataGenerator(fem)
+FEDataMathGenerator::FEDataMathGenerator(FEModel* fem) : FENodeDataGenerator(fem)
 {
 }
 
@@ -77,18 +78,20 @@ bool FEDataMathGenerator::Init()
 	return true;
 }
 
-void FEDataMathGenerator::value(const vec3d& r, double& data)
+FEDataMap* FEDataMathGenerator::Generate()
 {
-	vector<double> p{r.x, r.y, r.z};
-	assert(m_val.size() == 1);
-	data = m_val[0].value_s(p);
-}
-
-void FEDataMathGenerator::value(const vec3d& r, vec3d& data)
-{
-	vector<double> p{ r.x, r.y, r.z };
-	assert(m_val.size() <= 3);
-	data.x = m_val[0].value_s(p);
-	data.y = m_val[1].value_s(p);
-	data.z = m_val[2].value_s(p);
+	assert(m_nodeSet);
+	if (m_nodeSet == nullptr) return nullptr;
+	FENodeDataMap* map = new FENodeDataMap(FE_DOUBLE);
+	map->Create(m_nodeSet);
+	int N = m_nodeSet->Size();
+	for (int i=0; i<N; ++i)
+	{
+		FENode* node = m_nodeSet->Node(i);
+		vec3d r = node->m_r0;
+		vector<double> p{ r.x, r.y, r.z };
+		double v = m_val[0].value_s(p);
+		map->setValue(i, v);
+	}
+	return map;
 }

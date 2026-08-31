@@ -37,16 +37,17 @@ ADD_PARAMETER(m_phi0 , FE_RANGE_CLOSED(0.0, 1.0), "phi0");
 
 // material properties
 ADD_PROPERTY(m_pPerm, "permeability");
+ADD_PROPERTY(m_pSupp, "solvent_supply", FEProperty::Optional);
 
 END_FECORE_CLASS();
 
 //============================================================================
 // FEFSIMaterialPoint
 //============================================================================
-FEBiphasicFSIMaterialPoint::FEBiphasicFSIMaterialPoint(FEMaterialPoint* pt) : FEMaterialPoint(pt) {}
+FEBiphasicFSIMaterialPoint::FEBiphasicFSIMaterialPoint(FEMaterialPointData* pt) : FEMaterialPointData(pt) {}
 
 //-----------------------------------------------------------------------------
-FEMaterialPoint* FEBiphasicFSIMaterialPoint::Copy()
+FEMaterialPointData* FEBiphasicFSIMaterialPoint::Copy()
 {
     FEBiphasicFSIMaterialPoint* pt = new FEBiphasicFSIMaterialPoint(*this);
     if (m_pNext) pt->m_pNext = m_pNext->Copy();
@@ -56,7 +57,7 @@ FEMaterialPoint* FEBiphasicFSIMaterialPoint::Copy()
 //-----------------------------------------------------------------------------
 void FEBiphasicFSIMaterialPoint::Serialize(DumpStream& ar)
 {
-    FEMaterialPoint::Serialize(ar);
+	FEMaterialPointData::Serialize(ar);
     ar & m_phi0 & m_gradJ & m_Lw & m_ss;
 }
 
@@ -68,7 +69,7 @@ void FEBiphasicFSIMaterialPoint::Init()
     m_Lw = mat3d(0.0);
     m_ss.zero();
     
-    FEMaterialPoint::Init();
+	FEMaterialPointData::Init();
 }
 
 //============================================================================
@@ -83,12 +84,13 @@ FEBiphasicFSI::FEBiphasicFSI(FEModel* pfem) : FEFluidFSI(pfem)
     m_rhoTw = 0;
     m_phi0 = 0;
     
-    m_pPerm = 0;
+    m_pPerm = nullptr;
+    m_pSupp = nullptr;
 }
 
 //-----------------------------------------------------------------------------
 // returns a pointer to a new material point object
-FEMaterialPoint* FEBiphasicFSI::CreateMaterialPointData()
+FEMaterialPointData* FEBiphasicFSI::CreateMaterialPointData()
 {
     FEFluidMaterialPoint* fpt = new FEFluidMaterialPoint(m_pSolid->CreateMaterialPointData());
     FEFSIMaterialPoint* fst = new FEFSIMaterialPoint(fpt);
@@ -102,6 +104,9 @@ FEMaterialPoint* FEBiphasicFSI::CreateMaterialPointData()
 bool FEBiphasicFSI::Init()
 {
     m_rhoTw = m_pFluid->m_rhor;
+    
+    m_pPerm->Init();
+    if (m_pSupp) m_pSupp->Init();
     
     return FEMaterial::Init();
 }

@@ -1,0 +1,19 @@
+#! /bin/bash
+# Uncomment next line if not global on target machine
+set -e
+
+source "/opt/intel/oneapi/setvars.sh" --force
+cmake . -B cmbuild -LA \
+	-DCMAKE_BUILD_TYPE=Release \
+	-DSET_DEVCOMMIT=ON \
+	-DUSE_FFTW=ON \
+	-DUSE_HYPRE=ON \
+	-DUSE_LEVMAR=ON \
+	-DUSE_MKL=ON \
+	-DUSE_MMG=ON \
+	-DUSE_STATIC_STDLIBS=ON \
+	-DUSE_ZLIB=ON \
+	-DUSE_NLOPT=ON 
+pushd cmbuild
+make -j $(nproc)
+popd

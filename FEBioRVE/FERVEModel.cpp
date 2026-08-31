@@ -37,7 +37,7 @@ SOFTWARE.*/
 #include "FEBioMech/FEBCPrescribedDeformation.h"
 #include "FEBioMech/FESolidSolver2.h"
 #include "FEBioMech/FEElasticSolidDomain.h"
-#include "FEBioMech/FEPeriodicLinearConstraint.h"
+#include <FECore/FEPeriodicLinearConstraint.h>
 #include <FECore/FECube.h>
 #include <FECore/FEPointFunction.h>
 #include <FECore/FECoreKernel.h>
@@ -46,6 +46,9 @@ SOFTWARE.*/
 FERVEModel::FERVEModel()
 {
 	m_bctype = DISPLACEMENT;
+
+	// Don't collect function timings for RVE models.
+	CollectTimings(false);
 }
 
 //-----------------------------------------------------------------------------

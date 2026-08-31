@@ -142,28 +142,6 @@ bool FEElement::HasNode(int n) const
 }
 
 //-----------------------------------------------------------------------------
-// see if this element has the list of nodes n. Return 0 if not, 1 if same order
-// and -1 if opposite order
-int FEElement::HasNodes(int* n, const int ns) const
-{
-    int order = 1;
-    int l = Nodes();
-    if (l < ns) return 0;
-    vector<int> num(ns,-1);
-    for (int j=0; j<ns; ++j) {
-        for (int i = 0; i<l; ++i)
-            if (m_node[i] == n[j]) num[j] = i;
-    }
-    for (int j=0; j<ns; ++j) {
-        if (num[j] == -1)
-            return 0;
-    }
-    if ((num[1] - num[0] < 0) || (num[2] - num[1] < 0)) order = -1;
-
-    return order;
-}
-
-//-----------------------------------------------------------------------------
 int FEElement::FindNode(int n) const
 {
 	int l = Nodes();
@@ -386,6 +364,9 @@ int FEElement::GetFace(int nface, int* nf) const
 FETrussElement::FETrussElement()
 {
 	m_a0 = 0.0;
+	m_lam = 1.0;
+	m_tau = 0.0;
+	m_L0 = 0.0;
 }
 
 FETrussElement::FETrussElement(const FETrussElement& el)
@@ -404,6 +385,9 @@ FETrussElement::FETrussElement(const FETrussElement& el)
 
 	// truss data
 	m_a0 = el.m_a0;
+	m_L0 = el.m_L0;
+	m_lam = el.m_lam;
+	m_tau = el.m_tau;
 }
 
 FETrussElement& FETrussElement::operator = (const FETrussElement& el) 
@@ -422,8 +406,21 @@ FETrussElement& FETrussElement::operator = (const FETrussElement& el)
 
 	// copy truss data
 	m_a0 = el.m_a0;
+	m_L0 = el.m_L0;
+	m_lam = el.m_lam;
+	m_tau = el.m_tau;
 
 	return (*this); 
+}
+
+//-----------------------------------------------------------------------------
+void FETrussElement::Serialize(DumpStream& ar)
+{
+	FEElement::Serialize(ar);
+	if (ar.IsShallow() == false)
+	{
+		ar & m_a0 & m_L0 & m_lam & m_tau;
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -538,8 +535,55 @@ FELineElement& FELineElement::operator = (const FELineElement& el)
 
 void FELineElement::SetTraits(FEElementTraits* pt)
 {
-	// we don't allocate state data for surface elements
 	m_pT = pt;
 	m_node.resize(Nodes());
 	m_lnode.resize(Nodes());
+	m_State.Create(GaussPoints());
+}
+
+//=============================================================================
+FEBeamElement::FEBeamElement()
+{
+	m_lid = -1;
+	m_L0 = 0.0;
+}
+
+FEBeamElement::FEBeamElement(const FEBeamElement& el)
+{
+	// set the traits of the element
+	if (el.m_pT) { SetTraits(el.m_pT); m_State = el.m_State; }
+
+	// copy data
+	m_lid = el.m_lid;
+	m_L0 = el.m_L0;
+
+	// copy base class data
+	m_mat = el.m_mat;
+	m_nID = el.m_nID;
+	m_lid = el.m_lid;
+	m_node = el.m_node;
+	m_lnode = el.m_lnode;
+	m_lm = el.m_lm;
+	m_val = el.m_val;
+}
+
+FEBeamElement& FEBeamElement::operator = (const FEBeamElement& el)
+{
+	// set the traits of the element
+	if (el.m_pT) { SetTraits(el.m_pT); m_State = el.m_State; }
+
+	// copy data
+	m_lid = el.m_lid;
+	m_L0 = el.m_L0;
+
+	// copy base class data
+	m_mat = el.m_mat;
+	m_nID = el.m_nID;
+	m_lid = el.m_lid;
+	m_node = el.m_node;
+	m_lnode = el.m_lnode;
+	m_lm = el.m_lm;
+	m_val = el.m_val;
+
+	return (*this);
 }

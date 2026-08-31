@@ -133,6 +133,10 @@ public:
 		void ExternalForces(FEGlobalVector& R);
 	//}
 
+private:
+	//! Calculate initial accelerations for dynamics problems
+	bool InitAccelerations();
+
 public:
 	// convergence tolerances
 	double	m_Dtol;			//!< displacement tolerance
@@ -143,7 +147,6 @@ public:
 	int		m_nreq;			//!< start of rigid body equations
 
 public:
-	vector<double> m_Fn;	//!< concentrated nodal force vector
 	vector<double> m_Fr;	//!< nodal reaction forces
 	vector<double> m_Fint;	//!< internal load vector
 	vector<double> m_Fext;	//!< external load vector
@@ -157,6 +160,8 @@ public:
 	double	m_beta;			//!< Newmark parameter beta (displacement integration)
 	double	m_gamma;		//!< Newmark parameter gamme (velocity integration)
 
+	bool	m_init_accelerations;	//!< calculate initial accelerations for dynamic problems
+
 	// arc-length parameters
 	int		m_arcLength;	//!< arc-length method flag (0 = off, 1 = Crisfield)
 	double	m_al_scale;		//!< arc-length scaling parameter (i.e. psi).
@@ -167,12 +172,13 @@ public:
 
 protected:
 	FEDofList	m_dofU, m_dofV;
-	FEDofList	m_dofSQ;
+	FEDofList	m_dofQ;
 	FEDofList	m_dofRQ;
 	FEDofList	m_dofSU, m_dofSV, m_dofSA;
-    
+	FEDofList	m_dofBW, m_dofBA;
+
 protected:
-    FERigidSolverNew	m_rigidSolver;
+	FERigidSolverNew	m_rigidSolver;
 
 	// declare the parameter list
 	DECLARE_FECORE_CLASS();

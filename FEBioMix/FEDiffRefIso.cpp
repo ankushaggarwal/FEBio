@@ -31,10 +31,10 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEDiffRefIso, FESoluteDiffusivity)
-	ADD_PARAMETER(m_free_diff, FE_RANGE_GREATER_OR_EQUAL(0.0), "free_diff");
-	ADD_PARAMETER(m_diff0    , FE_RANGE_GREATER_OR_EQUAL(0.0), "diff0"    );
-	ADD_PARAMETER(m_diff1    , FE_RANGE_GREATER_OR_EQUAL(0.0), "diff1"    );
-	ADD_PARAMETER(m_diff2    , FE_RANGE_GREATER_OR_EQUAL(0.0), "diff2"    );
+	ADD_PARAMETER(m_free_diff, FE_RANGE_GREATER_OR_EQUAL(0.0), "free_diff")->setUnits(UNIT_DIFFUSIVITY)->setLongName("free diffusivity");
+	ADD_PARAMETER(m_diff0    , FE_RANGE_GREATER_OR_EQUAL(0.0), "diff0"    )->setUnits(UNIT_DIFFUSIVITY);
+	ADD_PARAMETER(m_diff1    , FE_RANGE_GREATER_OR_EQUAL(0.0), "diff1"    )->setUnits(UNIT_DIFFUSIVITY);
+	ADD_PARAMETER(m_diff2    , FE_RANGE_GREATER_OR_EQUAL(0.0), "diff2"    )->setUnits(UNIT_DIFFUSIVITY);
 	ADD_PARAMETER(m_M        , FE_RANGE_GREATER_OR_EQUAL(0.0), "M"        );
 	ADD_PARAMETER(m_alpha    , FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha"    );
 END_FECORE_CLASS();
@@ -47,14 +47,15 @@ FEDiffRefIso::FEDiffRefIso(FEModel* pfem) : FESoluteDiffusivity(pfem)
 	m_diff0 = 1;
 	m_diff1 = 0;
 	m_diff2 = 0;
-	m_M = m_alpha = 0;
+	m_M = 0;
+    m_alpha = 0;
 }
 
 //-----------------------------------------------------------------------------
 //! Free diffusivity
 double FEDiffRefIso::Free_Diffusivity(FEMaterialPoint& mp)
 {
-	return m_diff0;
+	return m_diff0(mp);
 }
 
 //-----------------------------------------------------------------------------
@@ -68,9 +69,8 @@ double FEDiffRefIso::Tangent_Free_Diffusivity_Concentration(FEMaterialPoint& mp,
 //! Diffusivity tensor.
 mat3ds FEDiffRefIso::Diffusivity(FEMaterialPoint& mp)
 {
+	FEBiphasicInterface* pbm = dynamic_cast<FEBiphasicInterface*>(GetAncestor());
 	FEElasticMaterialPoint& et = *mp.ExtractData<FEElasticMaterialPoint>();
-	FEBiphasicMaterialPoint* ppt = mp.ExtractData<FEBiphasicMaterialPoint>();
-    FEBiphasicFSIMaterialPoint* bfpt = mp.ExtractData<FEBiphasicFSIMaterialPoint>();
 	
 	// Identity
 	mat3dd I(1);
@@ -82,18 +82,14 @@ mat3ds FEDiffRefIso::Diffusivity(FEMaterialPoint& mp)
 	double J = et.m_J;
 	
 	// solid volume fraction in reference configuration
-    double phi0 = 0;
-    if (ppt)
-        phi0 = ppt->m_phi0t;
-    else if (bfpt)
-        phi0 = bfpt->m_phi0;
+    double phi0 = pbm->GetReferentialSolidVolumeFraction(mp);
 	
 	// --- strain-dependent permeability ---
 	
-	double f = pow((J-phi0)/(1-phi0),m_alpha)*exp(m_M*(J*J-1.0)/2.0);
-	double d0 = m_diff0*f;
-	double d1 = m_diff1/(J*J)*f;
-	double d2 = 0.5*m_diff2/pow(J,4)*f;
+	double f = pow((J-phi0)/(1-phi0),m_alpha(mp))*exp(m_M(mp)*(J*J-1.0)/2.0);
+	double d0 = m_diff0(mp)*f;
+	double d1 = m_diff1(mp)/(J*J)*f;
+	double d2 = 0.5*m_diff2(mp)/pow(J,4)*f;
 	mat3ds dt = d0*I+d1*b+2*d2*b.sqr();
 	
 	return dt;
@@ -103,9 +99,8 @@ mat3ds FEDiffRefIso::Diffusivity(FEMaterialPoint& mp)
 //! Tangent of diffusivity with respect to strain
 tens4dmm FEDiffRefIso::Tangent_Diffusivity_Strain(FEMaterialPoint &mp)
 {
+	FEBiphasicInterface* pbm = dynamic_cast<FEBiphasicInterface*>(GetAncestor());
 	FEElasticMaterialPoint& et = *mp.ExtractData<FEElasticMaterialPoint>();
-	FEBiphasicMaterialPoint* ppt = mp.ExtractData<FEBiphasicMaterialPoint>();
-    FEBiphasicFSIMaterialPoint* bfpt = mp.ExtractData<FEBiphasicFSIMaterialPoint>();
 	
 	// Identity
 	mat3dd I(1);
@@ -117,19 +112,17 @@ tens4dmm FEDiffRefIso::Tangent_Diffusivity_Strain(FEMaterialPoint &mp)
 	double J = et.m_J;
 	
 	// solid volume fraction in reference configuration
-    double phi0 = 0;
-    if (ppt)
-        phi0 = ppt->m_phi0t;
-    else if (bfpt)
-        phi0 = bfpt->m_phi0;
-	
-	double f = pow((J-phi0)/(1-phi0),m_alpha)*exp(m_M*(J*J-1.0)/2.0);
-	double d0 = m_diff0*f;
-	double d1 = m_diff1/(J*J)*f;
-	double d2 = 0.5*m_diff2/pow(J,4)*f;
-	double D0prime = (J*J*m_M+(J*(m_alpha+1)-phi0)/(J-phi0))*d0;
-	double D1prime = (J*J*m_M+(J*(m_alpha-1)+phi0)/(J-phi0))*d1;
-	double D2prime = (J*J*m_M+(J*(m_alpha-3)+3*phi0)/(J-phi0))*d2;
+	double phi0 = pbm->GetReferentialSolidVolumeFraction(mp);
+
+    double M = m_M(mp);
+    double alpha = m_alpha(mp);
+	double f = pow((J-phi0)/(1-phi0),alpha)*exp(M*(J*J-1.0)/2.0);
+	double d0 = m_diff0(mp)*f;
+	double d1 = m_diff1(mp)/(J*J)*f;
+	double d2 = 0.5*m_diff2(mp)/pow(J,4)*f;
+	double D0prime = (J*J*M+(J*(alpha+1)-phi0)/(J-phi0))*d0;
+	double D1prime = (J*J*M+(J*(alpha-1)+phi0)/(J-phi0))*d1;
+	double D2prime = (J*J*M+(J*(alpha-3)+3*phi0)/(J-phi0))*d2;
 	mat3ds d0hat = I*D0prime;
 	mat3ds d1hat = I*D1prime;
 	mat3ds d2hat = I*D2prime;

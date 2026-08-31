@@ -32,8 +32,9 @@ SOFTWARE.*/
 #include <FECore/DataStore.h>
 #include <FEBioPlot/PlotFile.h>
 #include <FECore/FECoreKernel.h>
-#include "febiolib_api.h"
 #include <FEBioLib/Logfile.h>
+#include "febiolib_api.h"
+#include "febiolib_types.h"
 
 //-----------------------------------------------------------------------------
 // Dump level determines the times the restart file is written
@@ -44,12 +45,15 @@ enum FE_Dump_Level {
 	FE_DUMP_MUST_POINTS     // create a dump file only on must-points
 };
 
-//-----------------------------------------------------------------------------
-struct ModelStats {
-	int		ntimeSteps;		//!< total nr of time steps
-	int		ntotalIters;	//!< total nr of equilibrium iterations
-	int		ntotalRHS;		//!< total nr of right hand side evaluations
-	int		ntotalReforms;	//!< total nr of stiffness reformations
+enum PlotObjectType {
+	OBJ_UNKNOWN           = 0,
+	OBJ_RIGID_BODY        = 1,
+	OBJ_GENERIC_JOINT     = 2,
+	OBJ_SPHERICAL_JOINT   = 3,
+	OBJ_PRISMATIC_JOINT   = 4,
+	OBJ_REVOLUTE_JOINT    = 5,
+	OBJ_CYLINDRICAL_JOINT = 6,
+	OBJ_PLANAR_JOINT      = 7
 };
 
 //-----------------------------------------------------------------------------
@@ -72,6 +76,11 @@ public:
 
 	//! Resets data structures
 	bool Reset() override;
+
+	//! solve the model
+	bool Solve() override;
+
+	TimingInfo GetTimingInfo();
 
 public: // --- I/O functions ---
 
@@ -96,6 +105,11 @@ public: // --- I/O functions ---
 	// get the log file
 	Logfile& GetLogFile() { return m_log; }
 
+	// get the report
+	std::string GetReport() const { return m_report; }
+
+	void CreateReport(bool b) { m_createReport = b; }
+
 public:
 	//! set the problem title
 	void SetTitle(const char* sz);
@@ -107,6 +121,9 @@ public: //! --- serialization for restarts ---
 	
 	//! Write or read data from archive
 	void Serialize(DumpStream& ar) override;
+
+	//! restart from dump file or restart input file
+	bool Restart(const char* szfile);
 
 private:
 	static bool handleCB(FEModel* fem, unsigned int nwhen, void* pd);
@@ -161,9 +178,6 @@ public: // Timers
 	//! Return the total timer
 	Timer& GetSolveTimer();
 
-	//! return number of seconds of time spent in linear solver
-	int GetLinearSolverTime();
-
 public:
 	//! set the debug level
 	void SetDebugLevel(int debugLvl);
@@ -188,6 +202,13 @@ public:
 
 	//! Get the stats 
 	ModelStats GetModelStats() const;
+	ModelStats GetStepStats(size_t n) const;
+	std::vector<ModelStats> GetStepStats() const;
+	std::vector<TimeStepStats> GetTimeStepStats() const;
+
+	// flag to show warnings and errors
+	void ShowWarningsAndErrors(bool b);
+	bool ShowWarningsAndErrors() const;
 
 private:
 	void print_parameter(FEParam& p, int level = 0);
@@ -199,14 +220,16 @@ private:
 	void UpdatePlotObjects();
 
 private:
+	Timer		m_TotalTime;	//!< timer to track total time
 	Timer		m_InputTime;	//!< timer to track time to read model
-	Timer		m_InitTime;		//!< timer to track model initialization
 	Timer		m_IOTimer;		//!< timer to track output (include plot, dump, and data)
 
 	PlotFile*	m_plot;			//!< the plot file
 	bool		m_becho;		//!< echo input to logfile
 	int			m_ndebug;		//!< debug level flag
 	bool		m_writeMesh;	//!< write a new mesh section
+
+	bool		m_bshowErrors;	//!< print warnings and errors
 
 	int			m_logLevel;		//!< output level for log file
 
@@ -215,7 +238,9 @@ private:
 
 private:
 	// accumulative statistics
-	ModelStats	m_stats;
+	ModelStats	m_modelStats;
+	std::vector<ModelStats> m_stepStats;
+	std::vector<TimeStepStats> m_timestepStats;
 
 protected: // file names
 	std::string		m_sfile_title;		//!< input file title 
@@ -232,6 +257,8 @@ protected:
 
 private:
 	Logfile	m_log;
+	std::string	m_report;
+	bool	m_createReport;
 
 	DECLARE_FECORE_CLASS();
 };

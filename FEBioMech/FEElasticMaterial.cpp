@@ -30,14 +30,12 @@ SOFTWARE.*/
 #include "FEElasticMaterial.h"
 #include "FECore/FEModel.h"
 
-BEGIN_FECORE_CLASS(FEElasticMaterial, FESolidMaterial)
-	ADD_PARAMETER(m_secant_stress, "secant_stress");
-END_FECORE_CLASS();
+//BEGIN_FECORE_CLASS(FEElasticMaterial, FESolidMaterial)
+//END_FECORE_CLASS();
 
 FEElasticMaterial::FEElasticMaterial(FEModel* pfem) : FESolidMaterial(pfem)
 { 
 	m_density = 1;
-	m_secant_stress = false;
 	AddDomainParameter(new FEElasticStress());
 }
 
@@ -48,14 +46,14 @@ FEElasticMaterial::~FEElasticMaterial()
 }
 
 //-----------------------------------------------------------------------------
-mat3ds FEElasticMaterial::SolidStress(FEMaterialPoint& pt)
-{
-	return (m_secant_stress ? SecantStress(pt) : Stress(pt));
+FEMaterialPointData* FEElasticMaterial::CreateMaterialPointData()
+{ 
+	return new FEElasticMaterialPoint;
 }
 
 //-----------------------------------------------------------------------------
 //! calculate spatial tangent stiffness at material point, using secant method
-mat3ds FEElasticMaterial::SecantStress(FEMaterialPoint& mp)
+mat3ds FEElasticMaterial::SecantStress(FEMaterialPoint& mp, bool PK2)
 {
 	// extract the deformation gradient
 	FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
@@ -88,15 +86,18 @@ mat3ds FEElasticMaterial::SecantStress(FEMaterialPoint& mp)
 		}
 	}
 
-	// push from material to spatial frame
-	mat3ds s = pt.push_forward(S);
-
-	// restore values
-	pt.m_F = F;
-	pt.m_J = J;
-
-	// return secant stress
-	return s;
+    // restore values
+    pt.m_F = F;
+    pt.m_J = J;
+    
+    if (PK2) return S;
+    else {
+        // push from material to spatial frame
+        mat3ds s = pt.push_forward(S);
+        
+        // return secant stress
+        return s;
+    }
 }
 
 //-----------------------------------------------------------------------------

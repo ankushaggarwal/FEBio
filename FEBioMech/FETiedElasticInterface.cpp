@@ -37,6 +37,7 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // Define sliding interface parameters
 BEGIN_FECORE_CLASS(FETiedElasticInterface, FEContactInterface)
+	ADD_PARAMETER(m_laugon   , "laugon"             )->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0");
 	ADD_PARAMETER(m_atol     , "tolerance"          );
 	ADD_PARAMETER(m_gtol     , "gaptol"             );
 	ADD_PARAMETER(m_epsn     , "penalty"            );
@@ -49,6 +50,8 @@ BEGIN_FECORE_CLASS(FETiedElasticInterface, FEContactInterface)
 	ADD_PARAMETER(m_srad     , "search_radius"      );
 	ADD_PARAMETER(m_naugmin  , "minaug"             );
 	ADD_PARAMETER(m_naugmax  , "maxaug"             );
+	ADD_PARAMETER(m_bflips   , "flip_primary"       );
+	ADD_PARAMETER(m_bflipm   , "flip_secondary"     );
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -266,7 +269,10 @@ FETiedElasticInterface::FETiedElasticInterface(FEModel* pfem) : FEContactInterfa
     
     m_naugmin = 0;
     m_naugmax = 10;
-    
+
+	m_bflips = false;
+	m_bflipm = false;
+
     // set parents
     m_ss.SetContactInterface(this);
     m_ms.SetContactInterface(this);
@@ -287,6 +293,13 @@ bool FETiedElasticInterface::Init()
     // initialize surface data
     if (m_ss.Init() == false) return false;
     if (m_ms.Init() == false) return false;
+
+	// Flip secondary and primary surfaces, if requested.
+	// Note that we turn off those flags because otherwise we keep flipping, each time we get here (e.g. in optimization)
+	// TODO: Of course, we shouldn't get here more than once. I think we also get through the FEModel::Reset, so I'll have
+	//       look into that. 
+	if (m_bflips) { m_ss.Invert(); m_bflips = false; }
+	if (m_bflipm) { m_ms.Invert(); m_bflipm = false; }
     
     return true;
 }
@@ -295,16 +308,15 @@ bool FETiedElasticInterface::Init()
 //! build the matrix profile for use in the stiffness matrix
 void FETiedElasticInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 {
-    FEModel& fem = *GetFEModel();
-    FEMesh& mesh = fem.GetMesh();
+    FEMesh& mesh = GetMesh();
     
     // get the DOFS
-    const int dof_X = fem.GetDOFIndex("x");
-    const int dof_Y = fem.GetDOFIndex("y");
-    const int dof_Z = fem.GetDOFIndex("z");
-    const int dof_RU = fem.GetDOFIndex("Ru");
-    const int dof_RV = fem.GetDOFIndex("Rv");
-    const int dof_RW = fem.GetDOFIndex("Rw");
+    const int dof_X = GetDOFIndex("x");
+    const int dof_Y = GetDOFIndex("y");
+    const int dof_Z = GetDOFIndex("z");
+    const int dof_RU = GetDOFIndex("Ru");
+    const int dof_RV = GetDOFIndex("Rv");
+    const int dof_RW = GetDOFIndex("Rw");
     
     const int ndpn = 6;
     vector<int> lm(ndpn*FEElement::MAX_NODES*2);
@@ -340,9 +352,9 @@ void FETiedElasticInterface::BuildMatrixProfile(FEGlobalMatrix& K)
                         lm[ndpn*l  ] = id[dof_X];
                         lm[ndpn*l+1] = id[dof_Y];
                         lm[ndpn*l+2] = id[dof_Z];
-                        lm[ndpn*l+4] = id[dof_RU];
-                        lm[ndpn*l+5] = id[dof_RV];
-                        lm[ndpn*l+6] = id[dof_RW];
+                        lm[ndpn*l+3] = id[dof_RU];
+                        lm[ndpn*l+4] = id[dof_RV];
+                        lm[ndpn*l+5] = id[dof_RW];
                     }
                     
                     for (l=0; l<nmeln; ++l)
@@ -351,9 +363,9 @@ void FETiedElasticInterface::BuildMatrixProfile(FEGlobalMatrix& K)
                         lm[ndpn*(l+nseln)  ] = id[dof_X];
                         lm[ndpn*(l+nseln)+1] = id[dof_Y];
                         lm[ndpn*(l+nseln)+2] = id[dof_Z];
-                        lm[ndpn*(l+nseln)+4] = id[dof_RU];
-                        lm[ndpn*(l+nseln)+5] = id[dof_RV];
-                        lm[ndpn*(l+nseln)+6] = id[dof_RW];
+                        lm[ndpn*(l+nseln)+3] = id[dof_RU];
+                        lm[ndpn*(l+nseln)+4] = id[dof_RV];
+                        lm[ndpn*(l+nseln)+5] = id[dof_RW];
                     }
                     
                     K.build_add(lm);
@@ -423,6 +435,9 @@ void FETiedElasticInterface::InitialProjection(FETiedElasticSurface& ss, FETiedE
     np.SetTolerance(m_stol);
     np.SetSearchRadius(m_srad);
     np.Init();
+
+	// let's count the number of contact pairs we find.
+	int contacts = 0;
     
     // loop over all integration points
     int n = 0;
@@ -455,6 +470,8 @@ void FETiedElasticInterface::InitialProjection(FETiedElasticSurface& ss, FETiedE
                 
                 // calculate the gap function
                 pt.m_Gap = q - r;
+
+				contacts++;
             }
             else
             {
@@ -463,6 +480,13 @@ void FETiedElasticInterface::InitialProjection(FETiedElasticSurface& ss, FETiedE
             }
         }
     }
+
+	// if we found no contact pairs, let's report this since this is probably not the user's intention
+	if (contacts == 0)
+	{
+		std::string name = GetName();
+		feLogWarning("No contact pairs found for tied interface \"%s\".\nThis contact interface may not have any effect.", name.c_str());
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -681,7 +705,7 @@ void FETiedElasticInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInf
     FEElementMatrix ke;
     
     // see how many reformations we've had to do so far
-    int nref = LS.GetSolver()->m_nref;
+    int nref = GetSolver()->m_nref;
     
     // set higher order stiffness mutliplier
     // NOTE: this algrotihm doesn't really need this
@@ -964,7 +988,7 @@ void FETiedElasticInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInf
 bool FETiedElasticInterface::Augment(int naug, const FETimeInfo& tp)
 {
     // make sure we need to augment
-    if (m_laugon != 1) return true;
+    if (m_laugon != FECore::AUGLAG_METHOD) return true;
     
     int i;
     vec3d Ln;

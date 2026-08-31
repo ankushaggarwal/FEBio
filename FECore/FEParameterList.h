@@ -36,7 +36,6 @@ SOFTWARE.*/
 #include "FEParam.h"
 #include "FEParamValidator.h"
 #include "ParamString.h"
-#include "MathObject.h"
 #include "fecore_api.h"
 #include <stdio.h>
 using namespace std;
@@ -51,19 +50,18 @@ class FEParamMat3ds;
 class FEDataArray;
 class tens3drs;
 class FEMaterialPointProperty;
-class Image;
 
 //-----------------------------------------------------------------------------
-typedef list<FEParam>::iterator FEParamIterator;
-typedef list<FEParam>::const_iterator FEParamIteratorConst;
+typedef std::list<FEParam>::iterator FEParamIterator;
+typedef std::list<FEParam>::const_iterator FEParamIteratorConst;
 
 //-----------------------------------------------------------------------------
 //! A list of material parameters
 class FECORE_API FEParameterList
 {
 public:
-	FEParameterList(FEParamContainer* pc) : m_pc(pc) {}
-	virtual ~FEParameterList(){}
+	FEParameterList(FEParamContainer* pc);
+	virtual ~FEParameterList();
 
 	//! assignment operator
 	void operator = (FEParameterList& l);
@@ -95,9 +93,17 @@ public:
 	//! return the parameter container
 	FEParamContainer* GetContainer() { return m_pc; }
 
+public:
+	int SetActiveGroup(const char* szgroup);
+	int GetActiveGroup();
+	int ParameterGroups() const;
+	const char* GetParameterGroupName(int i);
+
 protected:
 	FEParamContainer*	m_pc;	//!< parent container
-	list<FEParam>		m_pl;	//!< the actual parameter list
+	std::list<FEParam>		m_pl;	//!< the actual parameter list
+	std::vector<const char*>	m_pg;	//!< parameter groups
+	int	m_currentGroup;	//!< active parameter group (new parameters are assigned to the current group; can be -1)
 };
 
 //-----------------------------------------------------------------------------
@@ -114,6 +120,9 @@ public:
 	//! return the material's parameter list
 	FEParameterList& GetParameterList();
 	const FEParameterList& GetParameterList() const;
+
+	//! return true if this container has a parameter list
+	bool HasParameterList() const { return (m_pParam != nullptr); }
 
 	//! find a parameter using it's name
 	virtual FEParam* GetParameter(const char* szname);
@@ -133,17 +142,14 @@ public:
 	virtual bool Validate();
 
 public:
-	//! This function is called after the parameter was read in from the input file.
-	//! It can be used to do additional processing when a parameter is read in.
-	virtual void SetParameter(FEParam& p);
-
-	//! If a parameter has attributes, this function will be called
-	virtual bool SetParameterAttribute(FEParam& p, const char* szatt, const char* szval);
-
 	//! This copies the state of a parameter list (i.e. assigned load curve IDs)
 	//! This function assumes that there is a one-to-one correspondence between
 	//! source and target parameter lists.
 	void CopyParameterListState(const FEParameterList& pl);
+
+public:
+	void BeginParameterGroup(const char* szname);
+	void EndParameterGroup();
 
 public:
 	//! This function will be overridden by each class that defines a parameter list
@@ -156,55 +162,56 @@ public:
 	FEParam* AddParameter(void* pv, FEParamType type, int ndim, RANGE rng, const char* sz);
 
 public:
-	void AddParameter(int&                 v, const char* sz);
-	void AddParameter(bool&                v, const char* sz);
-	void AddParameter(double&              v, const char* sz);
-	void AddParameter(vec2d&               v, const char* sz);
-	void AddParameter(vec3d&               v, const char* sz);
-	void AddParameter(mat3d&               v, const char* sz);
-	void AddParameter(mat3ds&              v, const char* sz);
-	void AddParameter(FEParamDouble&       v, const char* sz);
-	void AddParameter(FEParamVec3&         v, const char* sz);
-	void AddParameter(FEParamMat3d&        v, const char* sz);
-	void AddParameter(FEParamMat3ds&       v, const char* sz);
-	void AddParameter(FEDataArray&         v, const char* sz);
-	void AddParameter(tens3drs& 		   v, const char* sz);
-	void AddParameter(std::string&         v, const char* sz);
-	void AddParameter(std::vector<int>& v   , const char* sz);
-	void AddParameter(std::vector<double>& v, const char* sz);
-	void AddParameter(std::vector<vec2d>&  v, const char* sz);
-	void AddParameter(std::vector<std::string>& v, const char* sz);
-	void AddParameter(FEMaterialPointProperty& v, const char* sz);
-	void AddParameter(MSimpleExpression& m, const char* sz);
-	void AddParameter(Image& im           , const char* sz);
+	FEParam* AddParameter(int&                 v, const char* sz);
+	FEParam* AddParameter(bool&                v, const char* sz);
+	FEParam* AddParameter(double&              v, const char* sz);
+	FEParam* AddParameter(vec2d&               v, const char* sz);
+	FEParam* AddParameter(vec3d&               v, const char* sz);
+	FEParam* AddParameter(mat3d&               v, const char* sz);
+	FEParam* AddParameter(mat3ds&              v, const char* sz);
+	FEParam* AddParameter(FEParamDouble&       v, const char* sz);
+	FEParam* AddParameter(FEParamVec3&         v, const char* sz);
+	FEParam* AddParameter(FEParamMat3d&        v, const char* sz);
+	FEParam* AddParameter(FEParamMat3ds&       v, const char* sz);
+	FEParam* AddParameter(FEDataArray&         v, const char* sz);
+	FEParam* AddParameter(tens3drs& 		   v, const char* sz);
+	FEParam* AddParameter(std::string&         v, const char* sz);
+	FEParam* AddParameter(std::vector<int>& v   , const char* sz);
+	FEParam* AddParameter(std::vector<double>& v, const char* sz);
+	FEParam* AddParameter(std::vector<vec2d>&  v, const char* sz);
+	FEParam* AddParameter(std::vector<std::string>& v, const char* sz);
+	FEParam* AddParameter(FEMaterialPointProperty& v, const char* sz);
 
-	void AddParameter(int&           v, RANGE rng, const char* sz);
-	void AddParameter(double&        v, RANGE rng, const char* sz);
-	void AddParameter(FEParamDouble& v, RANGE rng, const char* sz);
+	FEParam* AddParameter(int&           v, RANGE rng, const char* sz);
+	FEParam* AddParameter(double&        v, RANGE rng, const char* sz);
+	FEParam* AddParameter(FEParamDouble& v, RANGE rng, const char* sz);
 
-	void AddParameter(double& v, const char* sz, bool& watch);
+	FEParam* AddParameter(double& v, const char* sz, bool& watch);
 
-	void AddParameter(int*           v, int ndim, const char* sz);
-	void AddParameter(double*        v, int ndim, const char* sz);
-	void AddParameter(FEParamDouble* v, int ndim, const char* sz);
+	FEParam* AddParameter(int*           v, int ndim, const char* sz);
+	FEParam* AddParameter(double*        v, int ndim, const char* sz);
+	FEParam* AddParameter(FEParamDouble* v, int ndim, const char* sz);
 
-	void AddParameter(int*           v, int ndim, RANGE rng, const char* sz);
-	void AddParameter(double*        v, int ndim, RANGE rng, const char* sz);
-	void AddParameter(FEParamDouble* v, int ndim, RANGE rng, const char* sz);
+	FEParam* AddParameter(int*           v, int ndim, RANGE rng, const char* sz);
+	FEParam* AddParameter(double*        v, int ndim, RANGE rng, const char* sz);
+	FEParam* AddParameter(FEParamDouble* v, int ndim, RANGE rng, const char* sz);
 
-	void AddParameter(int& v, const char* sz, unsigned int flags, const char* szenum);
-	void AddParameter(std::vector<int>& v, const char* sz, unsigned int flags, const char* szenum);
+	FEParam* AddParameter(int& v, const char* sz, unsigned int flags, const char* szenum);
+	FEParam* AddParameter(std::vector<int>& v, const char* sz, unsigned int flags, const char* szenum);
+	FEParam* AddParameter(std::string& s, const char* sz, unsigned int flags, const char* szenum = nullptr);
 
-	template <typename T> void SetParameter(const char* sz, T v);
+	template <typename T> bool SetParameter(const char* sz, T v);
 
 private:
 	FEParameterList*	m_pParam;	//!< parameter list
 };
 
 //-----------------------------------------------------------------------------
-template <typename T> void FEParamContainer::SetParameter(const char* sz, T v)
+template <typename T> bool FEParamContainer::SetParameter(const char* sz, T v)
 {
-	FEParam* p = m_pParam->FindFromName(sz); p->value<T>() = v;
+	FEParam* p = m_pParam->FindFromName(sz);
+	if (p) p->value<T>() = v;
+	return (p != nullptr);
 }
 
 //-----------------------------------------------------------------------------
@@ -215,8 +222,10 @@ template <typename T> void FEParamContainer::SetParameter(const char* sz, T v)
 
 // the following macro declares the parameter list for a material
 #define DECLARE_FECORE_CLASS() \
-protected: \
-	void BuildParamList() override;
+	public: void BuildParamList() override;
+
+#define FECORE_BASE_CLASS(theClass) \
+	public: static const char* BaseClassName() { return #theClass; } \
 
 // the BEGIN_FECORE_CLASS defines the beginning of a parameter list
 #define BEGIN_FECORE_CLASS(theClass, baseClass) \
@@ -225,8 +234,14 @@ protected: \
 
 // the ADD_PARAMETER macro adds a parameter to the parameter list
 #define ADD_PARAMETER(...) \
-	AddParameter(__VA_ARGS__);
+	AddParameter(__VA_ARGS__)
 
 // the END_FECORE_CLASS defines the end of a parameter list
 #define END_FECORE_CLASS() \
 	}
+
+// macro for starting a parameter group
+#define BEGIN_PARAM_GROUP(a) BeginParameterGroup(a)
+
+// macro for ending a parameter group
+#define END_PARAM_GROUP()    EndParameterGroup()

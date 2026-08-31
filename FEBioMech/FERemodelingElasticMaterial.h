@@ -35,11 +35,11 @@ SOFTWARE.*/
 //! The solid supply has units of mass/(referential volume)/time
 //!
 
-class FEBIOMECH_API FESolidSupply : public FEMaterial
+class FEBIOMECH_API FESolidSupply : public FEMaterialProperty
 {
 public:
 	//! constructor
-	FESolidSupply(FEModel* pfem) : FEMaterial(pfem) {}
+	FESolidSupply(FEModel* pfem) : FEMaterialProperty(pfem) {}
 
 	//! solid supply
 	virtual double Supply(FEMaterialPoint& pt) = 0;
@@ -49,16 +49,18 @@ public:
 	
 	//! tangent of solute supply with respect to referential density
 	virtual double Tangent_Supply_Density(FEMaterialPoint& mp) = 0;	
+
+	FECORE_BASE_CLASS(FESolidSupply)
 };
 
 //-----------------------------------------------------------------------------
 //! Material point data for remodeling elastic materials
-class FEBIOMECH_API FERemodelingMaterialPoint : public FEMaterialPoint
+class FEBIOMECH_API FERemodelingMaterialPoint : public FEMaterialPointData
 {
 public:
-	FERemodelingMaterialPoint(FEMaterialPoint *pt) : FEMaterialPoint(pt) {}
+	FERemodelingMaterialPoint(FEMaterialPointData*pt) : FEMaterialPointData(pt) {}
     
-	FEMaterialPoint* Copy();
+	FEMaterialPointData* Copy();
     
 	void Init();
     
@@ -87,11 +89,15 @@ public:
 
 	//! calculate tangent of stress with solid density at material point
 	virtual mat3ds Tangent_Stress_Density(FEMaterialPoint& pt) = 0;
+    
+public:
+    int     m_comp;     // mixture component to which this material belongs (if applicable)
+    int     m_sbm;      // sbm ID associated with this material
 };
 
 //-----------------------------------------------------------------------------
 //! Material class for remodeling solids
-class FEBIOMECH_API FERemodelingElasticMaterial : public FEElasticMaterial
+class FEBIOMECH_API FERemodelingElasticMaterial : public FEElasticMaterial, public FERemodelingInterface
 {
 public:
 	//! constructor
@@ -105,15 +111,21 @@ public:
 	
 	//! tangent function of stress with strain
 	tens4ds Tangent(FEMaterialPoint& pt) override;
+    
+    //! evaluate referential mass density
+    double Density(FEMaterialPoint& pt) override;
+    
+    //! evaluate strain energy density of remodeling interface
+    double StrainEnergy(FEMaterialPoint& pt) override { return StrainEnergyDensity(pt); }
 	
 	//! tangent function of strain energy density with solid mass density
-	double Tangent_SE_Density(FEMaterialPoint& pt);
+	double Tangent_SE_Density(FEMaterialPoint& pt) override;
 	
 	//! tangent function of stress with solid mass density
-	mat3ds Tangent_Stress_Density(FEMaterialPoint& pt);
+	mat3ds Tangent_Stress_Density(FEMaterialPoint& pt) override;
 	
 	// returns a pointer to a new material point object
-	FEMaterialPoint* CreateMaterialPointData() override
+	FEMaterialPointData* CreateMaterialPointData() override
 	{
 		return new FERemodelingMaterialPoint(m_pBase->CreateMaterialPointData());
 	}

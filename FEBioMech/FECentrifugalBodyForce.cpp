@@ -31,9 +31,9 @@ SOFTWARE.*/
 #include "FEElasticMaterial.h"
 
 BEGIN_FECORE_CLASS(FECentrifugalBodyForce, FEBodyForce);
-	ADD_PARAMETER(w, "angular_speed");
+	ADD_PARAMETER(w, "angular_speed")->setUnits(UNIT_ANGULAR_VELOCITY);
 	ADD_PARAMETER(n, "rotation_axis");
-	ADD_PARAMETER(c, "rotation_center");
+	ADD_PARAMETER(c, "rotation_center")->setUnits(UNIT_LENGTH);
 END_FECORE_CLASS();
 
 FECentrifugalBodyForce::FECentrifugalBodyForce(FEModel* pfem) : FEBodyForce(pfem)
@@ -45,12 +45,16 @@ FECentrifugalBodyForce::FECentrifugalBodyForce(FEModel* pfem) : FEBodyForce(pfem
 
 vec3d FECentrifugalBodyForce::force(FEMaterialPoint& mp)
 {
-	FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
-	mat3ds K = stiffness(mp);
-	return K*(pt.m_rt - c);
+	mat3d K = stiffness(mp);
+	return K*(mp.m_rt - c);
 }
 
-mat3ds FECentrifugalBodyForce::stiffness(FEMaterialPoint& mp) 
+mat3d FECentrifugalBodyForce::stiffness(FEMaterialPoint& mp) 
 { 
 	return (mat3dd(1) - dyad(n))*(-w*w); 
+}
+
+double FECentrifugalBodyForce::divforce(FEMaterialPoint& mp)
+{
+    return -2*w*w;
 }

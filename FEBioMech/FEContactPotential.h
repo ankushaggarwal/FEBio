@@ -26,8 +26,8 @@ SOFTWARE.*/
 #pragma once
 #include "FEContactInterface.h"
 #include "FEContactSurface.h"
+#include <FECore/FENodeNodeList.h>
 #include <set>
-using namespace std;
 
 class FEContactPotentialSurface : public FEContactSurface
 {
@@ -47,19 +47,26 @@ public:
 public:
 	FEContactPotentialSurface(FEModel* fem);
 
+	void InitSurface() override;
+
 	void GetContactTraction(int nelem, vec3d& tc) override;
 
 	double GetContactArea() override;
 
 	FEMaterialPoint* CreateMaterialPoint() override;
+
+	vec3d GetContactForce() override;
 };
 
 typedef FEContactPotentialSurface::Data FECPContactPoint;
 
 class FEContactPotential : public FEContactInterface
 {
+	class Grid;
+
 public:
 	FEContactPotential(FEModel* fem);
+	~FEContactPotential();
 
 	// -- From FESurfacePairConstraint
 public:
@@ -81,6 +88,11 @@ public:
 	// init
 	bool Init() override;
 
+	// serialization
+	void Serialize(DumpStream& ar) override;
+
+	int IntegrationRule() const { return m_integrationRule; }
+
 	// -- from FEContactInterface
 public:
 	// The LoadVector function evaluates the "forces" that contribute to the residual of the system
@@ -90,11 +102,18 @@ public:
 	void StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp) override;
 
 protected:
-	void ElementForce(FESurfaceElement& el1, FESurfaceElement& el2, vector<double>& fe);
+	void ElementForce(FESurfaceElement& el1, FESurfaceElement& el2, std::vector<double>& fe);
 	void ElementStiffness(FESurfaceElement& el1, FESurfaceElement& el2, matrix& ke);
 
 	double PotentialDerive(double r);
 	double PotentialDerive2(double r);
+
+	void BuildNeighborTable();
+
+	void UpdateSurface(FESurface& surface);
+
+	//! checks for edge-face intersections
+	bool CheckIntersections(Grid& grid);
 
 protected:
 	FEContactPotentialSurface	m_surf1;
@@ -105,12 +124,18 @@ protected:
 	double	m_p;
 	double	m_Rin;
 	double	m_Rout;
+	double	m_Rmin;
 	double	m_wtol;
+	bool	m_checkIntersections;	//!< check for edge/face intersections
+
+	int		m_integrationRule = 0;
+	bool	m_excludeNeighbors = true;
 
 	double	m_c1, m_c2;
 
-	vector<	set<FESurfaceElement*> >			m_activeElements;
-	vector< set<FESurfaceElement*> >	m_elemNeighbors;
+	std::vector< std::set<FESurfaceElement*> >	m_activeElements;
+	std::vector< std::set<FESurfaceElement*> >	m_elemNeighbors;
+	FENodeNodeList m_NNL;
 
 	DECLARE_FECORE_CLASS();
 };

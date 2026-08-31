@@ -29,9 +29,11 @@ SOFTWARE.*/
 #pragma once
 #include "FEElasticMaterial.h"
 #include "FEBondRelaxation.h"
+#include "FEBondRecruitment.h"
 #include "FEReactiveVEMaterialPoint.h"
 #include "FEDamageMaterial.h"
 #include "FEReactiveFatigue.h"
+#include "FEReactivePlasticDamage.h"
 #include <FECore/FEFunction1D.h>
 
 //-----------------------------------------------------------------------------
@@ -59,6 +61,8 @@ public:
     //! data initialization
     bool Init() override;
     
+	void Serialize(DumpStream& ar) override;
+
 	//! stress function
 	mat3ds Stress(FEMaterialPoint& pt) override;
     mat3ds StressStrongBonds(FEMaterialPoint& pt);
@@ -90,7 +94,7 @@ public:
     int RVEGenerations(FEMaterialPoint& pt);
     
 	//! returns a pointer to a new material point object
-	FEMaterialPoint* CreateMaterialPointData() override;
+	FEMaterialPointData* CreateMaterialPointData() override;
 
     //! specialized material points
     void UpdateSpecializedMaterialPoints(FEMaterialPoint& mp, const FETimeInfo& tp) override;
@@ -103,16 +107,17 @@ public:
     
     //! evaluate scalar strain measure (same type as trigger strain for bond breaking)
     double ScalarStrain(FEMaterialPoint& mp);
-    
+
 private:
 	FEElasticMaterial*	m_pBase;	//!< pointer to elastic solid material for strong bonds
 	FEElasticMaterial*	m_pBond;	//!< pointer to elastic solid material for reactive bonds
 	FEBondRelaxation*   m_pRelx;    //!< pointer to bond relaxation material for reactive bonds
-    FEDamageCDF*        m_pWCDF;    //!< pointer to weak bond recruitment CDF
+    FEBondRecruitment*  m_pWCDF;    //!< pointer to weak bond recruitment function
 
 private:
     FEDamageMaterial*   m_pDmg;     //!< pointer to base material if it is a FEDamageMaterial
     FEReactiveFatigue*  m_pFtg;     //!< pointer to base material if it is a FEReactiveFatigue
+    FEReactivePlasticDamage*    m_pRPD;  //!< pointer to base material if it is a FEReactivePlasticDamage
     double Damage(FEMaterialPoint& mp); //!< return damage in this material
 
 public:

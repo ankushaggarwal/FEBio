@@ -31,7 +31,7 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEDamageNeoHookean, FEElasticMaterial)
-	ADD_PARAMETER(m_E, FE_RANGE_GREATER(0.0), "E");
+	ADD_PARAMETER(m_E, FE_RANGE_GREATER(0.0), "E")->setUnits(UNIT_PRESSURE);
 	ADD_PARAMETER(m_v, FE_RANGE_RIGHT_OPEN(-1.0, 0.5), "v");
 	ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "a");
 	ADD_PARAMETER(m_beta , FE_RANGE_CLOSED(0.0, 1.0), "b");
@@ -46,6 +46,13 @@ FEDamageNeoHookean::FEDamageNeoHookean(FEModel* pfem) : FEElasticMaterial(pfem)
 
 	m_alpha = 0.014;
 	m_beta = 0.34;
+}
+
+//-----------------------------------------------------------------------------
+// returns a pointer to a new material point object
+FEMaterialPointData* FEDamageNeoHookean::CreateMaterialPointData()
+{
+	return new FEDamageMaterialPoint(new FEElasticMaterialPoint);
 }
 
 //-----------------------------------------------------------------------------

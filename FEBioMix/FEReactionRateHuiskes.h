@@ -27,17 +27,18 @@ SOFTWARE.*/
 
 
 #pragma once
-#include "FEMultiphasic.h"
-#include "FEBioFluid/FEFluidSolutes.h"
-#include "FEBioFluid/FESolutesMaterial.h"
-#include "FEBioFluid/FEMultiphasicFSI.h"
+#include "FEChemicalReaction.h"
+#include <FECore/FEMeshTopo.h>
 
 class FEBIOMIX_API FEReactionRateHuiskes : public FEReactionRate
 {
 public:
 	//! constructor
-	FEReactionRateHuiskes(FEModel* pfem) : FEReactionRate(pfem) { m_B = m_psi0 = 0; }
+	FEReactionRateHuiskes(FEModel* pfem);
 	
+    //! initialization
+    bool Init() override;
+    
 	//! reaction rate at material point
 	double ReactionRate(FEMaterialPoint& pt) override;
 	
@@ -48,8 +49,17 @@ public:
 	double Tangent_ReactionRate_Pressure(FEMaterialPoint& pt) override;
 	
 public:
-	double	m_B;					//!< mass supply coefficient
-	double	m_psi0;					//!< specific strain energy at homeostasis
-	
+	FEParamDouble   m_B;					//!< mass supply coefficient
+    FEParamDouble   m_psi0;					//!< specific strain energy at homeostasis
+    double          m_D;                    //!< characteristic sensor distance
+
+private:
+    int             m_comp;                 //!< component of solid mixture (if applicable)
+    std::vector<std::vector<int>>    m_EPL; //!< list of element proximity lists
+    FEMeshTopo      m_topo;                 //!< mesh topology;
+    bool            m_binit;                //!< initialization flag
+    double          m_M;                    //!< molar mass of sbm
+    int             m_lsbm;                 //!< local sbm value
+
 	DECLARE_FECORE_CLASS();	
 };

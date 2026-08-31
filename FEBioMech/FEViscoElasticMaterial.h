@@ -31,17 +31,17 @@ SOFTWARE.*/
 
 //-----------------------------------------------------------------------------
 //! Material point data for visco-elastic materials
-class FEViscoElasticMaterialPoint : public FEMaterialPoint
+class FEViscoElasticMaterialPoint : public FEMaterialPointData
 {
 public:
 	enum { MAX_TERMS = 6 };
 
 public:
 	//! constructor
-	FEViscoElasticMaterialPoint(FEMaterialPoint *pt) : FEMaterialPoint(pt) {}
+	FEViscoElasticMaterialPoint(FEMaterialPointData* mp = nullptr);
 
 	//! copy material point data
-	FEMaterialPoint* Copy();
+	FEMaterialPointData* Copy();
 
 	//! Initialize material point data
 	void Init();
@@ -58,12 +58,12 @@ public:
 
 	mat3ds	m_H[MAX_TERMS];		//!< internal variables
 	mat3ds	m_Hp[MAX_TERMS];	//!< internal variables at previous timestep
+
+    double  m_alpha[MAX_TERMS];     //!< exponent of right-stretch tensor in series spring
+    double  m_alphap[MAX_TERMS];    //!< alpha at previous time step
     
-//	double	m_sed;	//!< elastic strain energy density
-//	double	m_sedp;	//!< elastic strain energy density at previous time
-    
-//	double	m_Hsed[MAX_TERMS];	//!< sed internal variables
-//	double	m_Hsedp[MAX_TERMS];	//!< sed internal variables at previous timestep
+	double	m_sed;	//!< elastic strain energy density
+	double	m_sedp;	//!< elastic strain energy density at previous time
 };
 
 
@@ -95,14 +95,17 @@ public:
 	tens4ds Tangent(FEMaterialPoint& pt) override;
 
 	//! strain energy density
-	double StrainEnergyDensity(FEMaterialPoint& pt) override;
+    double StrainEnergyDensity(FEMaterialPoint& pt) override { return 0; }
+    
+    //! calculate exponent of right-stretch tensor in series spring
+//    bool SeriesStretchExponent(FEMaterialPoint& pt);
     
     // returns a pointer to a new material point object
-	FEMaterialPoint* CreateMaterialPointData() override;
+	FEMaterialPointData* CreateMaterialPointData() override;
 
 public: 
 	// material parameters
-	double	m_g0;			//!< intitial visco-elastic coefficient
+	FEParamDouble m_g0;			//!< intitial visco-elastic coefficient
 	double	m_g[MAX_TERMS];	//!< visco-elastic coefficients
 	double	m_t[MAX_TERMS];	//!< relaxation times
 

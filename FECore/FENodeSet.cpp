@@ -35,9 +35,9 @@ SOFTWARE.*/
 //=============================================================================
 // FENodeSet
 //-----------------------------------------------------------------------------
-FENodeSet::FENodeSet(FEModel* fem) : FEItemList(fem), m_Node(&fem->GetMesh())
+FENodeSet::FENodeSet(FEModel* fem) : FEItemList(fem, FEItemList::FE_ELEMENT_SET), m_Node(fem ? &fem->GetMesh() : nullptr)
 {
-	SetMesh(&fem->GetMesh());
+	if (fem) SetMesh(&fem->GetMesh());
 }
 
 //-----------------------------------------------------------------------------
@@ -84,4 +84,14 @@ void FENodeSet::Serialize(DumpStream& ar)
 	FEItemList::Serialize(ar);
 	if (ar.IsShallow()) return;
 	ar & m_Node;
+}
+
+void FENodeSet::SaveClass(DumpStream& ar, FENodeSet* p)
+{
+}
+
+FENodeSet* FENodeSet::LoadClass(DumpStream& ar, FENodeSet* p)
+{
+	p = new FENodeSet(&ar.GetFEModel());
+	return p;
 }

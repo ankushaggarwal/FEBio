@@ -40,16 +40,18 @@ public:
     FEFluidFSITraction(FEModel* pfem);
     
     //! calculate pressure stiffness
-    void StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp) override;
+    void StiffnessMatrix(FELinearSystem& LS) override;
     
     //! calculate load vector
-    void LoadVector(FEGlobalVector& R, const FETimeInfo& tp) override;
+    void LoadVector(FEGlobalVector& R) override;
     
     //! serialize data
     void Serialize(DumpStream& ar) override;
     
     //! initialization
     bool Init() override;
+
+	void Activate() override;
     
 private:
 	double GetFluidDilatation(FESurfaceMaterialPoint& mp, double alpha);

@@ -45,7 +45,7 @@ public:
 	FEUncoupledElasticMixture(FEModel* pfem);
 
 	// returns a pointer to a new material point object
-	FEMaterialPoint* CreateMaterialPointData() override;
+	FEMaterialPointData* CreateMaterialPointData() override;
 
 	// return number of materials
 	int Materials() { return (int)m_pMat.size(); }
@@ -71,16 +71,17 @@ public:
 	
 	//! calculate strain energy density at material point
 	double DevStrainEnergyDensity(FEMaterialPoint& pt) override;
-    
-	//! the density is the sum of the constituent densities
-	double Density(FEMaterialPoint& mp) override;
 
 public:
     double StrongBondDevSED(FEMaterialPoint& pt) override;
     double WeakBondDevSED(FEMaterialPoint& pt) override;
 
 private:
-	std::vector<FEElasticMaterial*>	m_pMat;	//!< pointers to elastic materials
+	// TODO: temporarily reverted back to uncoupled materials. This was needed to make sure that 
+	//       FEBio Studio displays the uncoupled materials as options. 
+	//       Need to figure out a way to allow elastic materials again.
+	std::vector<FEUncoupledMaterial*>	m_pMat;	//!< pointers to elastic materials
+//	std::vector<FEElasticMaterial*>	m_pMat;	//!< pointers to elastic materials
 
 	DECLARE_FECORE_CLASS();
 };

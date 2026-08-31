@@ -36,7 +36,8 @@ SOFTWARE.*/
 // Base class for evaluating scalar parameters
 class FECORE_API FEScalarValuator : public FEValuator
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FESCALARVALUATOR_ID)
+	FECORE_BASE_CLASS(FEScalarValuator)
 
 public:
 	FEScalarValuator(FEModel* fem) : FEValuator(fem) {};
@@ -61,12 +62,7 @@ public:
 
 	double* constValue() override { return &m_val; }
 
-	FEScalarValuator* copy() override
-	{ 
-		FEConstValue* val = new FEConstValue(GetFEModel()); 
-		val->m_val = m_val;
-		return val;
-	}
+	FEScalarValuator* copy() override;
 
 private:
 	double	m_val;
@@ -99,7 +95,7 @@ private:
 class FECORE_API FEMathValue : public FEScalarValuator
 {
 public:
-	FEMathValue(FEModel* fem) : FEScalarValuator(fem) {}
+	FEMathValue(FEModel* fem);
 	~FEMathValue();
 	double operator()(const FEMaterialPoint& pt) override;
 
@@ -116,6 +112,7 @@ public:
 private:
 	std::string			m_expr;
 	FEMathExpression	m_math;
+	FECoreBase*			m_parent;
 
 	DECLARE_FECORE_CLASS();
 };
@@ -126,6 +123,7 @@ class FECORE_API FEMappedValue : public FEScalarValuator
 public:
 	FEMappedValue(FEModel* fem);
 	void setDataMap(FEDataMap* val);
+	void setScaleFactor(double s);
 
 	FEDataMap* dataMap();
 
@@ -136,6 +134,7 @@ public:
 	void Serialize(DumpStream& dmp) override;
 
 private:
+	double		m_scale;	// scale factor
 	FEDataMap*	m_val;
 };
 

@@ -23,15 +23,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
-
-
-
 #pragma once
 #include <FECore/FEPrescribedBC.h>
-#include <FECore/tens3d.h>
+#include "febiomech_api.h"
 
-//-----------------------------------------------------------------------------
-class FEBCPrescribedDeformation : public FEPrescribedNodeSet
+class FEBIOMECH_API FEBCPrescribedDeformation : public FEPrescribedNodeSet
 {
 public:
 	FEBCPrescribedDeformation(FEModel* pfem);
@@ -43,42 +39,9 @@ public:
 protected:
 	void GetNodalValues(int nodelid, std::vector<double>& val) override;
 
-	bool SetDofList(FEDofList& dofs) override;
-
 protected:
 	double	m_scale;
 	mat3d	m_F;
-
-	DECLARE_FECORE_CLASS();
-};
-
-//-----------------------------------------------------------------------------
-class FEBCPrescribedDeformation2O : public FEPrescribedNodeSet
-{
-public:
-	FEBCPrescribedDeformation2O(FEModel* pfem);
-
-	void SetScale(double s, int lc = -1);
-
-	void SetReferenceNode(int n);
-
-	bool Init() override;
-
-	void SetDeformationGradient(const mat3d& F);
-	void SetDeformationHessian(const tens3drs& G);
-
-	void CopyFrom(FEBoundaryCondition* pbc) override;
-
-protected:
-	bool SetDofList(FEDofList& dofs) override;
-
-	void GetNodalValues(int nodelist, std::vector<double>& val) override;
-
-protected:
-	double	m_scale;
-	mat3d	m_F;
-	tens3drs m_G;
-	int	m_refNode;
 
 	DECLARE_FECORE_CLASS();
 };

@@ -34,6 +34,7 @@ SOFTWARE.*/
 #include "FENodeSet.h"
 #include "FEDofList.h"
 #include "FESurfaceElement.h"
+#include "FENode.h"
 
 //-----------------------------------------------------------------------------
 class FEMesh;
@@ -46,10 +47,16 @@ class FECORE_API FESurfaceMaterialPoint : public FEMaterialPoint
 {
 public:
 	vec3d	dxr, dxs;		// tangent vectors at material point
+    vec3d   m_rp;
 
 	// return the surface element
 	FESurfaceElement* SurfaceElement() { return (FESurfaceElement*)m_elem; }
 
+    void Update(const FETimeInfo& tp) override
+    {
+        m_rp = m_rt;
+    }
+    
 	void Serialize(DumpStream& ar) override
 	{
 		FEMaterialPoint::Serialize(ar);
@@ -84,6 +91,9 @@ typedef std::function<void(FESurfaceMaterialPoint& mp, const FESurfaceDofShape& 
 
 class FECORE_API FESurface : public FEMeshPartition
 {
+	FECORE_SUPER_CLASS(FESURFACE_ID)
+	FECORE_BASE_CLASS(FESurface)
+
 public:
 	//! default constructor
 	FESurface(FEModel* fem);
@@ -93,7 +103,8 @@ public:
 
 	//! initialize surface data structure
 	bool Init() override;
-	void InitSurface();
+	
+	virtual void InitSurface();
     
 	//! creates surface
 	void Create(int nsize, int elemType = -1);
@@ -133,7 +144,7 @@ public:
 	const FEElement& ElementRef(int n) const override { return m_el[n]; }
 
 	//! find the solid or shell element of a surface element
-	FEElement* FindElement(FESurfaceElement& el);
+	FESurfaceElement::ELEMENT_REF FindElement(FESurfaceElement& el);
 
     //! for interface surfaces, find the index of both solid elements
     //! on either side of the interface
@@ -158,7 +169,7 @@ public:
 	bool IsInsideElement(FESurfaceElement& el, double r, double s, double tol = 0);
 
 	//! See if a ray intersects an element
-	bool Intersect(FESurfaceElement& el, vec3d r, vec3d n, double rs[2], double& g, double eps);
+	bool Intersect(FESurfaceElement& el, vec3d r, vec3d n, double rs[2], double& g, double eps, bool checkNormal = true);
 
 	//! Invert the surface
 	void Invert();
@@ -172,8 +183,14 @@ public:
 	//! Get the nodal coordinates of an element
 	void NodalCoordinates(FESurfaceElement& el, vec3d* re);
     
+    //! Get the nodal coordinates of an element at previoust time
+    void PreviousNodalCoordinates(FESurfaceElement& el, vec3d* re);
+    
     //! Determine if a face on this surface is pointing away or into a specified element
     double FacePointing(FESurfaceElement& se, FEElement& el);
+    
+    //! Project a FEParamDouble to nodes of the surface
+    void ProjectToNodes(FEParamDouble& pd, std::vector<double>& d);
     
 
 public:
@@ -204,6 +221,15 @@ public:
 	//! calculate the surface normal at an integration point
 	vec3d SurfaceNormal(const FESurfaceElement& el, int n) const;
 
+    //! calculate the nodal normals
+    void UpdateNodeNormals();
+    
+    //! return the nodal normals
+    vec3d NodeNormal(const int inode) { return m_nn[inode]; }
+    
+    //! calculate the global position of an integration point
+    vec3d Local2Global0(FESurfaceElement& el, int n);
+    
 	//! calculate the global position of a point on the surface
 	vec3d Local2Global(FESurfaceElement& el, double r, double s);
 
@@ -222,6 +248,9 @@ public:
 	//! calculates the covariant base vectors of a surface
 	void CoBaseVectors(FESurfaceElement& el, double r, double s, vec3d t[2]);
 
+    //! calculates the covariant base vectors of a surface at an integration point in the reference configuration
+    void CoBaseVectors0(const FESurfaceElement& el, int j, vec3d t[2]) const;
+    
 	//! calculates covariant base vectors of a surface
 	void CoBaseVectors0(FESurfaceElement& el, double r, double s, vec3d t[2]);
 
@@ -302,7 +331,11 @@ public:
 protected:
 	FEFacetSet*					m_surf;		//!< the facet set from which this surface is built
 	vector<FESurfaceElement>	m_el;		//!< surface elements
+    vector<vec3d>               m_nn;       //!< node normals
     bool                        m_bitfc;    //!< interface status
     double                      m_alpha;    //!< intermediate time fraction
 	bool						m_bshellb;	//!< true if this surface is the bottom of a shell domain
 };
+
+// Calculates the volume inside a (closed) surface. 
+FECORE_API double CalculateSurfaceVolume(FESurface& s);

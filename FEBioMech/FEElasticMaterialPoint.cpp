@@ -30,19 +30,19 @@ SOFTWARE.*/
 #include "FEElasticMaterialPoint.h"
 
 //-----------------------------------------------------------------------------
-FEElasticMaterialPoint::FEElasticMaterialPoint()
+FEElasticMaterialPoint::FEElasticMaterialPoint(FEMaterialPointData* mp) : FEMaterialPointData(mp)
 {
 	m_F.unit();
 	m_J = 1;
 	m_s.zero();
-    m_v = m_a = m_gradJ = vec3d(0, 0, 0);
+    m_v = m_a = vec3d(0, 0, 0);
     m_buncoupled = false;
     m_Wt = m_Wp = 0;
     m_p = 0;
 }
 
 //-----------------------------------------------------------------------------
-FEMaterialPoint* FEElasticMaterialPoint::Copy()
+FEMaterialPointData* FEElasticMaterialPoint::Copy()
 {
 	FEElasticMaterialPoint* pt = new FEElasticMaterialPoint(*this);
 	if (m_pNext) pt->m_pNext = m_pNext->Copy();
@@ -58,24 +58,23 @@ void FEElasticMaterialPoint::Init()
 
 	m_s.zero();
 
-    m_v = m_a = m_gradJ = vec3d(0, 0, 0);
+    m_v = m_a = vec3d(0, 0, 0);
     m_L.zero();
     
     m_Wt = m_Wp = 0;
 
-	m_rt = m_r0;
-    
     m_p = 0;
     
 	// don't forget to initialize the base class
-    FEMaterialPoint::Init();
+    FEMaterialPointData::Init();
 }
 
 //-----------------------------------------------------------------------------
 void FEElasticMaterialPoint::Serialize(DumpStream& ar)
 {
-	FEMaterialPoint::Serialize(ar);
-    ar & m_F & m_J & m_s & m_v & m_a & m_gradJ & m_L & m_Wt & m_Wp & m_p;
+	FEMaterialPointData::Serialize(ar);
+    ar & m_F & m_J & m_s & m_v & m_a & m_L & m_Wt & m_Wp & m_p;
+	ar & m_buncoupled;
 }
 
 //-----------------------------------------------------------------------------
@@ -286,6 +285,15 @@ mat3ds FEElasticMaterialPoint::SmallStrain() const
 	// caculate small strain tensor
 	const mat3d& F = m_F;
 	return mat3ds(F[0][0] - 1.0, F[1][1] - 1.0, F[2][2] - 1.0, 0.5*(F[0][1] + F[1][0]), 0.5*(F[0][2] + F[2][0]), 0.5*(F[1][2] + F[2][1]));
+}
+
+//-----------------------------------------------------------------------------
+//! Calculates the Almansi strain tensor
+mat3ds FEElasticMaterialPoint::AlmansiStrain() const
+{
+    // caculate small strain tensor
+    mat3ds B = LeftCauchyGreen();
+    return (mat3dd(1)-B.inverse())/2.;
 }
 
 //-----------------------------------------------------------------------------

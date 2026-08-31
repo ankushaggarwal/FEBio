@@ -411,6 +411,18 @@ inline vec3d mat3ds::operator* (const vec3d& r) const
 	);
 }
 
+// comparison
+inline bool mat3ds::operator == (const mat3ds& d)
+{
+	return (
+		(m[XX] == d.m[XX]) &&
+		(m[XY] == d.m[XY]) &&
+		(m[YY] == d.m[YY]) &&
+		(m[XZ] == d.m[XZ]) &&
+		(m[YZ] == d.m[YZ]) &&
+		(m[ZZ] == d.m[ZZ]));
+}
+
 // trace
 inline double mat3ds::tr() const
 {
@@ -615,9 +627,9 @@ inline vec3d mat3da::operator * (const vec3d& a)
 
 inline mat3d::mat3d(double a)
 {
-	d[0][0] = a; d[0][1] = a; d[0][2] = a;
-	d[1][0] = a; d[1][1] = a; d[1][2] = a;
-	d[2][0] = a; d[2][1] = a; d[2][2] = a;
+	d[0][0] = a; d[0][1] = 0; d[0][2] = 0;
+	d[1][0] = 0; d[1][1] = a; d[1][2] = 0;
+	d[2][0] = 0; d[2][1] = 0; d[2][2] = a;
 }
 
 inline mat3d::mat3d(double a00, double a01, double a02,
@@ -634,6 +646,13 @@ inline mat3d::mat3d(double m[3][3])
 	d[0][0] = m[0][0]; d[0][1] = m[0][1]; d[0][2] = m[0][2];
 	d[1][0] = m[1][0]; d[1][1] = m[1][1]; d[1][2] = m[1][2];
 	d[2][0] = m[2][0]; d[2][1] = m[2][1]; d[2][2] = m[2][2];
+}
+
+inline mat3d::mat3d(double a[9])
+{
+	d[0][0] = a[0]; d[0][1] = a[1]; d[0][2] = a[2];
+	d[1][0] = a[3]; d[1][1] = a[4]; d[1][2] = a[5];
+	d[2][0] = a[6]; d[2][1] = a[7]; d[2][2] = a[8];
 }
 
 inline mat3d::mat3d(const mat3dd& m)
@@ -672,6 +691,23 @@ inline mat3d::mat3d(const mat2d& m)
 
 inline mat3d::mat3d(const vec3d& e1, const vec3d& e2, const vec3d& e3)
 {
+	d[0][0] = e1.x; d[0][1] = e2.x; d[0][2] = e3.x;
+	d[1][0] = e1.y; d[1][1] = e2.y; d[1][2] = e3.y;
+	d[2][0] = e1.z; d[2][1] = e2.z; d[2][2] = e3.z;
+}
+
+inline mat3d::mat3d(const vec3d& a, const vec3d& b)
+{
+	vec3d e1(a);
+	vec3d e3 = a ^ b;
+	vec3d e2 = e3 ^ e1;
+
+	// normalize
+	e1.unit();
+	e2.unit();
+	e3.unit();
+
+	// set the value
 	d[0][0] = e1.x; d[0][1] = e2.x; d[0][2] = e3.x;
 	d[1][0] = e1.y; d[1][1] = e2.y; d[1][2] = e3.y;
 	d[2][0] = e1.z; d[2][1] = e2.z; d[2][2] = e3.z;
@@ -1034,22 +1070,33 @@ inline mat3d mat3d::inverse() const
 }
 
 // return the inverse matrix
-inline double mat3d::invert(mat3d& Ai)
+inline bool mat3d::invert()
 {
     double D = det();
-    if (D != 0) {
-        double Di = 1/D;
-        Ai = mat3d(Di*(d[1][1]*d[2][2] - d[1][2]*d[2][1]),
-                   Di*(d[0][2]*d[2][1] - d[0][1]*d[2][2]),
-                   Di*(d[0][1]*d[1][2] - d[1][1]*d[0][2]),
-                   Di*(d[1][2]*d[2][0] - d[1][0]*d[2][2]),
-                   Di*(d[0][0]*d[2][2] - d[0][2]*d[2][0]),
-                   Di*(d[0][2]*d[1][0] - d[0][0]*d[1][2]),
-                   Di*(d[1][0]*d[2][1] - d[1][1]*d[2][0]),
-                   Di*(d[0][1]*d[2][0] - d[0][0]*d[2][1]),
-                   Di*(d[0][0]*d[1][1] - d[0][1]*d[1][0]));
-    }
-    return D;
+	if (D == 0) return false;
+	D = 1.0 / D;
+
+	// calculate conjugate Matrix
+	double mi[3][3];
+
+	mi[0][0] =  (d[1][1] * d[2][2] - d[1][2] * d[2][1]);
+	mi[0][1] = -(d[1][0] * d[2][2] - d[1][2] * d[2][0]);
+	mi[0][2] =  (d[1][0] * d[2][1] - d[1][1] * d[2][0]);
+
+	mi[1][0] = -(d[0][1] * d[2][2] - d[0][2] * d[2][1]);
+	mi[1][1] =  (d[0][0] * d[2][2] - d[0][2] * d[2][0]);
+	mi[1][2] = -(d[0][0] * d[2][1] - d[0][1] * d[2][0]);
+
+	mi[2][0] =  (d[0][1] * d[1][2] - d[0][2] * d[1][1]);
+	mi[2][1] = -(d[0][0] * d[1][2] - d[0][2] * d[1][0]);
+	mi[2][2] =  (d[0][0] * d[1][1] - d[0][1] * d[1][0]);
+
+	// divide by det and transpose
+	d[0][0] = mi[0][0] * D; d[1][0] = mi[0][1] * D; d[2][0] = mi[0][2] * D;
+	d[0][1] = mi[1][0] * D; d[1][1] = mi[1][1] * D; d[2][1] = mi[1][2] * D;
+	d[0][2] = mi[2][0] * D; d[1][2] = mi[2][1] * D; d[2][2] = mi[2][2] * D;
+
+    return true;
 }
 
 // return the transpose matrix
@@ -1100,4 +1147,56 @@ inline double mat3d::norm() const
 inline double mat3d::dotdot(const mat3d& T) const
 {
 	return (T.d[0][0]*d[0][0] + T.d[0][1]*d[0][1] + T.d[0][2]*d[0][2] + T.d[1][0]*d[1][0] + T.d[1][1]*d[1][1] + T.d[1][2]*d[1][2] + T.d[2][0]*d[2][0] + T.d[2][1]*d[2][1] + T.d[2][2]*d[2][2]);
+}
+
+
+// return the inverse matrix
+inline bool mat3f::invert()
+{
+	float D = d[0][0] * (d[1][1] * d[2][2] - d[1][2] * d[2][1])
+		+ d[0][1] * (d[1][2] * d[2][0] - d[2][2] * d[1][0])
+		+ d[0][2] * (d[1][0] * d[2][1] - d[1][1] * d[2][0]);
+
+	if (D == 0.f) return false;
+	D = 1.f / D;
+
+	// calculate conjugate Matrix
+	float mi[3][3];
+
+	mi[0][0] =  (d[1][1] * d[2][2] - d[1][2] * d[2][1]);
+	mi[0][1] = -(d[1][0] * d[2][2] - d[1][2] * d[2][0]);
+	mi[0][2] =  (d[1][0] * d[2][1] - d[1][1] * d[2][0]);
+
+	mi[1][0] = -(d[0][1] * d[2][2] - d[0][2] * d[2][1]);
+	mi[1][1] =  (d[0][0] * d[2][2] - d[0][2] * d[2][0]);
+	mi[1][2] = -(d[0][0] * d[2][1] - d[0][1] * d[2][0]);
+
+	mi[2][0] =  (d[0][1] * d[1][2] - d[0][2] * d[1][1]);
+	mi[2][1] = -(d[0][0] * d[1][2] - d[0][2] * d[1][0]);
+	mi[2][2] =  (d[0][0] * d[1][1] - d[0][1] * d[1][0]);
+
+	// divide by det and transpose
+	d[0][0] = mi[0][0] * D; d[1][0] = mi[0][1] * D; d[2][0] = mi[0][2] * D;
+	d[0][1] = mi[1][0] * D; d[1][1] = mi[1][1] * D; d[2][1] = mi[1][2] * D;
+	d[0][2] = mi[2][0] * D; d[1][2] = mi[2][1] * D; d[2][2] = mi[2][2] * D;
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+inline void mat3d::exp(const vec3d& v)
+{
+	double l = v.norm();
+	if (l == 0.0) *this = mat3d::identity();
+	else
+	{
+		double a = 0.5 * (tan(0.5 * l) / (0.5 * l));
+		vec3d w = v * a;
+		mat3da S(w);
+		mat3d S2 = S * S;
+		mat3dd I(1.0);
+		mat3d E = I + (S2 + S) * (2.0 / (1.0 + w.norm2()));
+
+		*this = E;
+	}
 }

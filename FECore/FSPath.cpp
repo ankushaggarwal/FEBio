@@ -26,6 +26,8 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include <regex>
 #include <string>
+#include <cstring>
+#include <string.h>
 #include "FSPath.h"
 
 
@@ -61,7 +63,7 @@ void FSPath::filePath(char* filename, char* path)
     char sep = '/';
 #endif
 
-    sprintf(path,"%s%c", name.substr(0,index).c_str(), sep);
+    snprintf(path, name.length(), "%s%c", name.substr(0,index).c_str(), sep);
 }
 
 

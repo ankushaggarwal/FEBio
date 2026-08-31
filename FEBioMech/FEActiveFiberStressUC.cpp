@@ -31,14 +31,23 @@ SOFTWARE.*/
 #include "FEElasticMaterial.h"
 #include <FECore/log.h>
 
+void FEActiveFiberStressUC::Data::Serialize(DumpStream& ar)
+{
+	FEMaterialPointData::Serialize(ar);
+	ar & m_lamp;
+}
+
 //=====================================================================================
 
 BEGIN_FECORE_CLASS(FEActiveFiberStressUC, FEUncoupledMaterial);
-	ADD_PARAMETER(m_smax, "smax");
+	ADD_PARAMETER(m_smax, "smax")->setUnits(UNIT_PRESSURE);
 	ADD_PARAMETER(m_ac, "activation");
 
 	ADD_PROPERTY(m_stl, "stl", FEProperty::Optional);
 	ADD_PROPERTY(m_stv, "stv", FEProperty::Optional);
+
+	ADD_PROPERTY(m_Q, "mat_axis")->SetFlags(FEProperty::Optional);
+
 END_FECORE_CLASS();
 
 FEActiveFiberStressUC::FEActiveFiberStressUC(FEModel* fem) : FEUncoupledMaterial(fem)
@@ -69,7 +78,7 @@ mat3ds FEActiveFiberStressUC::DevStress(FEMaterialPoint& mp)
 
 	double stl = (m_stl ? m_stl->value(lam) : 1.0);
 	double v = 0;// (lam - lamp) / dt;
-	double stv = (m_stv ? m_stl->value(v) : 1.0);
+	double stv = (m_stv ? m_stv->value(v) : 1.0);
 
 	mat3ds A = dyad(a);
 
@@ -106,7 +115,7 @@ tens4ds FEActiveFiberStressUC::DevTangent(FEMaterialPoint& mp)
 
 	double stl = (m_stl ? m_stl->value(lam) : 1.0);
 	double v = 0;// (lam - lamp) / dt;
-	double stv = (m_stv ? m_stl->value(v) : 1.0);
+	double stv = (m_stv ? m_stv->value(v) : 1.0);
 
 	double dstl = (m_stl ? m_stl->derive(lam) : 0.0);
 	double dstv = (m_stv ? m_stv->derive(v) / dt : 0.0);

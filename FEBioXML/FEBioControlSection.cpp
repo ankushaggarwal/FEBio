@@ -31,7 +31,81 @@ SOFTWARE.*/
 #include "FECore/FEAnalysis.h"
 #include "FECore/FEModel.h"
 #include "FECore/FECoreKernel.h"
+#include <FECore/FETimeStepController.h>
 #include <FECore/log.h>
+#include <FECore/FENewtonSolver.h>
+
+#ifndef WIN32
+#define strnicmp strncasecmp
+#endif
+
+class FEObsoleteParamHandler25 : public FEObsoleteParamHandler
+{
+public:
+	FEObsoleteParamHandler25(XMLTag& tag, FEAnalysis* step, FEModelBuilder* feb) : m_step(step), m_feb(feb), FEObsoleteParamHandler(tag, step)
+	{
+		AddParam("max_ups", "solver.qn_method.max_ups", FE_PARAM_INT);
+	}
+
+	bool ProcessTag(XMLTag& tag) override
+	{
+		if (tag == "qnmethod")
+		{
+			const char* szv = tag.szvalue();
+			int l = (int)strlen(szv);
+			if      ((strnicmp(szv, "BFGS"   , l) == 0) || (strnicmp(szv, "0", l) == 0)) m_qnmethod = QN_BFGS;
+			else if ((strnicmp(szv, "BROYDEN", l) == 0) || (strnicmp(szv, "1", l) == 0)) m_qnmethod = QN_BROYDEN;
+			else if ((strnicmp(szv, "JFNK"   , l) == 0) || (strnicmp(szv, "2", l) == 0)) m_qnmethod = QN_JFNK;
+			else return false;
+
+			return true;
+		}
+		else if (tag == "shell_formulation")
+		{
+			int nshell = 0;
+			tag.value(nshell);
+			switch (nshell)
+			{
+			case 0: m_feb->m_default_shell = OLD_SHELL; break;
+			case 1: m_feb->m_default_shell = NEW_SHELL; break;
+			case 2: m_feb->m_default_shell = EAS_SHELL; break;
+			case 3: m_feb->m_default_shell = ANS_SHELL; break;
+			default:
+				return false;
+			}
+			return true;
+		}
+		else return FEObsoleteParamHandler::ProcessTag(tag);
+	}
+
+	void MapParameters() override
+	{
+		FEModel* fem = m_step->GetFEModel();
+
+		// first, make sure that the QN method is allocated
+		if (m_qnmethod != -1)
+		{
+			FENewtonSolver& solver = dynamic_cast<FENewtonSolver&>(*m_step->GetFESolver());
+			FEProperty& qn = *solver.FindProperty("qn_method");
+			switch (m_qnmethod)
+			{
+			case QN_BFGS   : solver.SetSolutionStrategy(fecore_new<FENewtonStrategy>("BFGS"   , fem)); break;
+			case QN_BROYDEN: solver.SetSolutionStrategy(fecore_new<FENewtonStrategy>("Broyden", fem)); break;
+			case QN_JFNK   : solver.SetSolutionStrategy(fecore_new<FENewtonStrategy>("JFNK"   , fem)); break;
+			default:
+				assert(false);
+			}
+		}
+
+		// now, process the rest
+		FEObsoleteParamHandler::MapParameters();
+	}
+
+private:
+	int	m_qnmethod = 0;
+	FEAnalysis* m_step;
+	FEModelBuilder* m_feb;
+};
 
 //-----------------------------------------------------------------------------
 void FEBioControlSection::Parse(XMLTag& tag)
@@ -51,6 +125,8 @@ void FEBioControlSection::Parse(XMLTag& tag)
 		throw FEBioImport::FailedAllocatingSolver(m.c_str());
 	}
 
+	FEObsoleteParamHandler25 ctrlParams(tag, pstep, GetBuilder());
+
 	++tag;
 	do
 	{
@@ -60,13 +136,18 @@ void FEBioControlSection::Parse(XMLTag& tag)
 			// next, check the solver parameters
 			if (ReadParameter(tag, psolver->GetParameterList()) == false)
 			{
-				throw XMLReader::InvalidTag(tag);
+				if (ctrlParams.ProcessTag(tag) == false)
+				{
+					throw XMLReader::InvalidTag(tag);
+				}
 			}
 		}
 
 		++tag;
 	}
 	while (!tag.isend());
+
+	ctrlParams.MapParameters();
 }
 
 //-----------------------------------------------------------------------------
@@ -89,10 +170,10 @@ bool FEBioControlSection::ParseCommonParams(XMLTag& tag)
 	if (tag == "analysis")
 	{
 		XMLAtt& att = tag.Attribute("type");
-		if      (att == "static"      ) pstep->m_nanalysis = FE_STATIC;
-		else if (att == "dynamic"     ) pstep->m_nanalysis = FE_DYNAMIC;
-		else if (att == "steady-state") pstep->m_nanalysis = FE_STEADY_STATE;
-		else if (att == "transient"   ) pstep->m_nanalysis = FE_DYNAMIC;
+		if      (att == "static"      ) pstep->m_nanalysis = 0;
+		else if (att == "dynamic"     ) pstep->m_nanalysis = 1;
+		else if (att == "steady-state") pstep->m_nanalysis = 0;
+		else if (att == "transient"   ) pstep->m_nanalysis = 1;
 		else throw XMLReader::InvalidAttributeValue(tag, "type", att.cvalue());
 	}
 	else if (ReadParameter(tag, modelParams) == false)
@@ -288,6 +369,8 @@ void FEStepControlSection::Parse(XMLTag& tag)
 		throw FEBioImport::FailedAllocatingSolver(m.c_str());
 	}
 
+	FEObsoleteParamHandler25 ctrlParams(tag, pstep, GetBuilder());
+
 	++tag;
 	do
 	{
@@ -297,7 +380,10 @@ void FEStepControlSection::Parse(XMLTag& tag)
 			// next, check the solver parameters
 			if (ReadParameter(tag, psolver->GetParameterList()) == false)
 			{
-				throw XMLReader::InvalidTag(tag);
+				if (ctrlParams.ProcessTag(tag) == false)
+				{
+					throw XMLReader::InvalidTag(tag);
+				}
 			}
 		}
 
@@ -323,10 +409,10 @@ bool FEStepControlSection::ParseCommonParams(XMLTag& tag)
 	if (tag == "analysis")
 	{
 		XMLAtt& att = tag.Attribute("type");
-		if      (att == "static"      ) pstep->m_nanalysis = FE_STATIC;
-		else if (att == "dynamic"     ) pstep->m_nanalysis = FE_DYNAMIC;
-		else if (att == "steady-state") pstep->m_nanalysis = FE_STEADY_STATE;
-		else if (att == "transient"   ) pstep->m_nanalysis = FE_DYNAMIC;
+		if      (att == "static"      ) pstep->m_nanalysis = 0;
+		else if (att == "dynamic"     ) pstep->m_nanalysis = 1;
+		else if (att == "steady-state") pstep->m_nanalysis = 0;
+		else if (att == "transient"   ) pstep->m_nanalysis = 1;
 		else throw XMLReader::InvalidAttributeValue(tag, "type", att.cvalue());
 	}
 	else if (tag == "shell_normal_nodal") tag.value(feb->m_shell_norm_nodal);

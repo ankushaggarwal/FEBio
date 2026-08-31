@@ -29,17 +29,20 @@ SOFTWARE.*/
 #pragma once
 
 #include "FECore/FEMaterial.h"
+#include "febiomech_api.h"
 
 //---------------------------------------------------------------------------
 // Base class for fiber density distribution functions
 //
-class FEFiberDensityDistribution : public FEMaterial
+class FEBIOMECH_API FEFiberDensityDistribution : public FEMaterialProperty
 {
 public:
-    FEFiberDensityDistribution(FEModel* pfem) : FEMaterial(pfem) {}
+    FEFiberDensityDistribution(FEModel* pfem) : FEMaterialProperty(pfem) {}
     
     // Evaluation of fiber density along n0
     virtual double FiberDensity(FEMaterialPoint& mp, const vec3d& n0) = 0;
+
+    FECORE_BASE_CLASS(FEFiberDensityDistribution)
 };
 
 //---------------------------------------------------------------------------
@@ -64,8 +67,8 @@ public:
     double FiberDensity(FEMaterialPoint& mp, const vec3d& n0) override;
     
 public:
-    FEParamVec3 m_spa;      // semi-principal axes of ellipsoid
-    
+	FEParamDouble m_spa[3]; // semi-principal axes of ellipsoid
+
 	// declare the parameter list
 	DECLARE_FECORE_CLASS();
 };

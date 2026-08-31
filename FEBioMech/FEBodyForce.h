@@ -45,11 +45,14 @@ public:
 	//! calculate the body force at a material point
 	virtual vec3d force(FEMaterialPoint& pt) = 0;
 
+	//! calculate the divergence of the body force at a material point
+	//! TODO: Is this used anywhere?
+	virtual double divforce(FEMaterialPoint& pt);
+
 	//! calculate constribution to stiffness matrix
-	virtual mat3ds stiffness(FEMaterialPoint& pt) = 0;
+	virtual mat3d stiffness(FEMaterialPoint& pt) = 0;
 
 public:
-	// NOTE: Work in progress! Working on integrating body loads as a model loads
-	void LoadVector(FEGlobalVector& R, const FETimeInfo& tp) override;
-	void StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp) override;
+	void LoadVector(FEGlobalVector& R) override;
+	void StiffnessMatrix(FELinearSystem& LS) override;
 };

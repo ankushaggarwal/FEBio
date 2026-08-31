@@ -29,12 +29,13 @@ SOFTWARE.*/
 #pragma once
 #include <FECore/FETrussDomain.h>
 #include "FEElasticDomain.h"
-#include "FETrussMaterial.h"
+#include "FESolidMaterial.h"
 #include <FECore/FEDofList.h>
+#include "febiomech_api.h"
 
 //-----------------------------------------------------------------------------
 //! Domain described by 3D truss elements
-class FEElasticTrussDomain : public FETrussDomain, public FEElasticDomain
+class FEBIOMECH_API FEElasticTrussDomain : public FETrussDomain, public FEElasticDomain
 {
 public:
 	//! Constructor
@@ -42,6 +43,9 @@ public:
 
 	//! copy operator
 	FEElasticTrussDomain& operator = (FEElasticTrussDomain& d);
+
+	//! initialize the domain
+	bool Init() override;
 
 	//! Reset data
 	void Reset() override;
@@ -64,6 +68,8 @@ public:
 	//! get the dof list
 	const FEDofList& GetDOFList() const override;
 
+	double detJt(FETrussElement& el) const;
+
 public: // overloads from FEElasticDomain
 
 	//! update the truss stresses
@@ -72,8 +78,8 @@ public: // overloads from FEElasticDomain
 	//! internal stress forces
 	void InternalForces(FEGlobalVector& R) override;
 
-	//! calculate body force \todo implement this
-	void BodyForce(FEGlobalVector& R, FEBodyForce& bf) override { assert(false); }
+	//! calculate body force
+	void BodyForce(FEGlobalVector& R, FEBodyForce& bf) override;
 
 	//! Calculates inertial forces for dynamic problems
 	void InertialForces(FEGlobalVector& R, vector<double>& F) override { assert(false); }
@@ -81,11 +87,14 @@ public: // overloads from FEElasticDomain
 	//! calculates the global stiffness matrix for this domain
 	void StiffnessMatrix(FELinearSystem& LS) override;
 
-	//! intertial stiffness matrix \todo implement this
-	void MassMatrix(FELinearSystem& LS, double scale) override { assert(false); }
+	//! intertial stiffness matrix
+	void MassMatrix(FELinearSystem& LS, double scale) override;
 
 	//! body force stiffness matrix \todo implement this
 	void BodyForceStiffness(FELinearSystem& LS, FEBodyForce& bf) override { assert(false); }
+
+	//! elemental mass matrix
+	void ElementMassMatrix(FETrussElement& el, matrix& ke);
 
 protected:
 	//! calculates the truss element stiffness matrix
@@ -95,7 +104,11 @@ protected:
 	void ElementInternalForces(FETrussElement& el, vector<double>& fe);
 
 protected:
-	FETrussMaterial*	m_pMat;
+	FESolidMaterial*	m_pMat;
+	double	m_a0;
+	double	m_v;
 
 	FEDofList	m_dofU;
+
+	DECLARE_FECORE_CLASS();
 };

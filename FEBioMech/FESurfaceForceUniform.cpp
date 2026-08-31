@@ -33,8 +33,8 @@
 
 //=============================================================================
 BEGIN_FECORE_CLASS(FESurfaceForceUniform, FESurfaceLoad)
-    ADD_PARAMETER(m_scale   , "scale");
-    ADD_PARAMETER(m_force   , "force");
+    ADD_PARAMETER(m_scale   , "scale")->SetFlags(FE_PARAM_ADDLC | FE_PARAM_VOLATILE);
+    ADD_PARAMETER(m_force   , "force")->SetFlags(0)->setUnits(UNIT_FORCE);
     ADD_PARAMETER(m_bshellb , "shell_bottom");
 END_FECORE_CLASS();
 
@@ -86,7 +86,7 @@ bool FESurfaceForceUniform::Init()
 }
 
 //-----------------------------------------------------------------------------
-void FESurfaceForceUniform::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
+void FESurfaceForceUniform::LoadVector(FEGlobalVector& R)
 {
     FESurface& surf = GetSurface();
     surf.SetShellBottom(m_bshellb);
@@ -110,7 +110,7 @@ void FESurfaceForceUniform::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 }
 
 //-----------------------------------------------------------------------------
-void FESurfaceForceUniform::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
+void FESurfaceForceUniform::StiffnessMatrix(FELinearSystem& LS)
 {
     // Nothing to do here.
     // TODO: I think if the linear flag is false, I do need to evaluate a stiffness.

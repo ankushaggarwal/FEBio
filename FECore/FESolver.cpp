@@ -37,14 +37,15 @@ SOFTWARE.*/
 #include "FELinearConstraintManager.h"
 #include "FENodalLoad.h"
 #include "LinearSolver.h"
-
-REGISTER_SUPER_CLASS(FESolver, FESOLVER_ID);
+#include "log.h"
 
 BEGIN_FECORE_CLASS(FESolver, FECoreBase)
-	ADD_PARAMETER(m_msymm    , "symmetric_stiffness");
-	ADD_PARAMETER(m_eq_scheme, "equation_scheme");
-	ADD_PARAMETER(m_eq_order , "equation_order" );
-	ADD_PARAMETER(m_bwopt    , "optimize_bw");
+	BEGIN_PARAM_GROUP("linear system");
+		ADD_PARAMETER(m_msymm    , "symmetric_stiffness", 0, "non-symmetric\0symmetric\0symmetric structure\0preferred\0")->setLongName("matrix format");
+		ADD_PARAMETER(m_eq_scheme, "equation_scheme", 0, "staggered\0block\0");
+		ADD_PARAMETER(m_eq_order , "equation_order", 0, "default\0reverse\0febio2\0");
+		ADD_PARAMETER(m_bwopt    , "optimize_bw");
+	END_PARAM_GROUP();
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -60,7 +61,7 @@ FESolver::FESolver(FEModel* fem) : FECoreBase(fem)
 
 	m_neq = 0;
 
-	m_bwopt = 0;
+	m_bwopt = false;
 
 	m_eq_scheme = EQUATION_SCHEME::STAGGERED;
 	m_eq_order = EQUATION_ORDER::NORMAL_ORDER;
@@ -128,13 +129,6 @@ LinearSolver* FESolver::GetLinearSolver()
 }
 
 //-----------------------------------------------------------------------------
-//! Matrix symmetry flag
-int FESolver::MatrixSymmetryFlag() const
-{ 
-	return m_msymm; 
-}
-
-//-----------------------------------------------------------------------------
 //! get matrix type
 Matrix_Type FESolver::MatrixType() const
 {
@@ -144,8 +138,59 @@ Matrix_Type FESolver::MatrixType() const
 	case REAL_UNSYMMETRIC   : mtype = REAL_UNSYMMETRIC; break;
 	case REAL_SYMMETRIC     : mtype = REAL_SYMMETRIC; break;
 	case REAL_SYMM_STRUCTURE: mtype = REAL_SYMM_STRUCTURE; break;
+	default:
+		mtype = PreferredMatrixType();
+		const char* szfmt = "";
+		switch (mtype)
+		{
+		case REAL_UNSYMMETRIC: szfmt = "unsymmetric"; break;
+		case REAL_SYMMETRIC  : szfmt = "symmetric"; break;
+		default:
+			assert(false);
+		}
+		feLogInfo("Setting matrix format to: %s", szfmt);
 	}
 	return mtype;
+}
+
+// find the preferred matrix type: 
+// symmetric unless any model component has its symmetric_stiffness parameter set to false
+Matrix_Type FESolver::PreferredMatrixType() const
+{
+	FEModel& fem = *GetFEModel();
+	for (int i = 0; i < fem.ModelLoads(); ++i)
+	{
+		FEModelLoad* pl = fem.ModelLoad(i);
+		if (pl->IsActive() && (pl->PreferredMatrixType() == REAL_UNSYMMETRIC))
+		{
+			return REAL_UNSYMMETRIC; // no point in continuing
+		}
+	}
+	for (int i = 0; i < fem.NonlinearConstraints(); ++i)
+	{
+		FENLConstraint* pc = fem.NonlinearConstraint(i);
+		if (pc->IsActive())
+		{
+			FEParam* p = pc->GetParameter("symmetric_stiffness");
+			if (p && (p->type() == FE_PARAM_BOOL) && !p->value<bool>())
+			{
+				return REAL_UNSYMMETRIC; // no point in continuing
+			}
+		}
+	}
+	for (int i = 0; i < fem.SurfacePairConstraints(); ++i)
+	{
+		FESurfacePairConstraint* pc = fem.SurfacePairConstraint(i);
+		if (pc->IsActive())
+		{
+			FEParam* p = pc->GetParameter("symmetric_stiffness");
+			if (p && (p->type() == FE_PARAM_BOOL) && !p->value<bool>())
+			{
+				return REAL_UNSYMMETRIC; // no point in continuing
+			}
+		}
+	}
+	return REAL_SYMMETRIC;
 }
 
 //-----------------------------------------------------------------------------
@@ -256,8 +301,6 @@ void FESolver::BuildMatrixProfile(FEGlobalMatrix& G, bool breset)
 	// (otherwise we only build the "dynamic" profile)
 	if (breset)
 	{
-		vector<int> elm;
-
 		// Add all elements to the profile
 		// Loop over all active domains
 		for (int nd = 0; nd<mesh.Domains(); ++nd)
@@ -306,6 +349,9 @@ bool FESolver::InitStep(double time)
 
 	// evaluate load controllers values at current time
 	fem.EvaluateLoadControllers(time);
+
+	// evaluate data generators at current time
+	fem.EvaluateDataGenerators(time);
 
 	// evaluate load parameters
 	fem.EvaluateLoadParameters();
@@ -786,19 +832,6 @@ bool FESolver::Augment()
 }
 
 //-----------------------------------------------------------------------------
-//! Calculates concentrated nodal loads
-void FESolver::NodalLoads(FEGlobalVector& R, const FETimeInfo& tp)
-{
-	// loop over nodal loads
-	FEModel& fem = *GetFEModel();
-	for (int i = 0; i<fem.NodalLoads(); ++i)
-	{
-		FENodalLoad& fc = *fem.NodalLoad(i);
-		if (fc.IsActive()) fc.LoadVector(R, tp);
-	}
-}
-
-//-----------------------------------------------------------------------------
 // return the node (mesh index) from an equation number
 FENodalDofInfo FESolver::GetDOFInfoFromEquation(int ieq)
 {
@@ -806,6 +839,7 @@ FENodalDofInfo FESolver::GetDOFInfoFromEquation(int ieq)
 	info.m_eq = ieq;
 	info.m_node = -1;
 	info.m_dof = -1;
+	info.szdof = "";
 
 	FEModel& fem = *GetFEModel();
 	FEMesh& mesh = fem.GetMesh();
@@ -817,8 +851,11 @@ FENodalDofInfo FESolver::GetDOFInfoFromEquation(int ieq)
 		{
 			if (id[j] == ieq)
 			{
-				info.m_node = i;
+				info.m_node = node.GetID();
 				info.m_dof = j;
+				DOFS& Dofs = GetFEModel()->GetDOFS();
+				info.szdof = Dofs.GetDOFName(info.m_dof);
+				if (info.szdof == nullptr) info.szdof = "???";
 				return info;
 			}
 		}

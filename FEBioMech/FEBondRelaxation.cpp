@@ -33,6 +33,7 @@ SOFTWARE.*/
 #include <FECore/expint_Ei.h>
 #include <FECore/gamma.h>
 #include <FECore/besselIK.h>
+#include <math.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -42,7 +43,7 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationExponential, FEBondRelaxation)
-    ADD_PARAMETER(m_tau, FE_RANGE_GREATER(0.0), "tau");
+    ADD_PARAMETER(m_tau, FE_RANGE_GREATER(0.0), "tau")->setLongName("time constant")->setUnits(UNIT_TIME);
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -71,9 +72,9 @@ double FEBondRelaxationExponential::Relaxation(FEMaterialPoint& mp, const double
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationExpDistortion, FEBondRelaxation)
-    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0" );
-    ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER_OR_EQUAL(0.0), "tau1" );
-    ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha");
+    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0" )->setLongName("constant coefficient")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER_OR_EQUAL(0.0), "tau1" )->setLongName("power coefficient")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha")->setLongName("power exponent");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -163,8 +164,8 @@ double FEBondRelaxationExpDistUser::Relaxation(FEMaterialPoint& mp, const double
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationFung, FEBondRelaxation)
-    ADD_PARAMETER(m_tau1, FE_RANGE_GREATER(0.0), "tau1");
-    ADD_PARAMETER(m_tau2, FE_RANGE_GREATER(0.0), "tau2");
+    ADD_PARAMETER(m_tau1, FE_RANGE_GREATER(0.0), "tau1")->setLongName("min. relaxation time")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_tau2, FE_RANGE_GREATER(0.0), "tau2")->setLongName("max. relaxation time")->setUnits(UNIT_TIME);
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -211,7 +212,7 @@ double FEBondRelaxationFung::Relaxation(FEMaterialPoint& mp, const double t, con
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationPark, FEBondRelaxation)
-    ADD_PARAMETER(m_tau , FE_RANGE_GREATER(0.0), "tau");
+    ADD_PARAMETER(m_tau , FE_RANGE_GREATER(0.0), "tau")->setUnits(UNIT_TIME);
     ADD_PARAMETER(m_beta, FE_RANGE_GREATER(0.0), "beta");
 END_FECORE_CLASS();
 
@@ -240,11 +241,11 @@ double FEBondRelaxationPark::Relaxation(FEMaterialPoint& mp, const double t, con
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationParkDistortion, FEBondRelaxation)
-    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0" );
-    ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER_OR_EQUAL(0.0), "tau1" );
-    ADD_PARAMETER(m_beta0, FE_RANGE_GREATER         (0.0), "beta0");
-    ADD_PARAMETER(m_beta1, FE_RANGE_GREATER_OR_EQUAL(0.0), "beta1");
-    ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha");
+    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0" )->setLongName("constant coefficient tau0")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER_OR_EQUAL(0.0), "tau1" )->setLongName("power coefficient tau1")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_beta0, FE_RANGE_GREATER         (0.0), "beta0")->setLongName("constant coefficient beta0");
+    ADD_PARAMETER(m_beta1, FE_RANGE_GREATER_OR_EQUAL(0.0), "beta1")->setLongName("power coefficient beta1");
+    ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha")->setLongName("power exponent alpha");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -345,8 +346,8 @@ double FEBondRelaxationParkDistUser::Relaxation(FEMaterialPoint& mp, const doubl
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationPower, FEBondRelaxation)
-    ADD_PARAMETER(m_tau , FE_RANGE_GREATER(0.0), "tau");
-    ADD_PARAMETER(m_beta, FE_RANGE_GREATER(0.0), "beta");
+    ADD_PARAMETER(m_tau , FE_RANGE_GREATER(0.0), "tau" )->setLongName("time constant")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_beta, FE_RANGE_GREATER(0.0), "beta")->setLongName("power exponent");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -374,11 +375,11 @@ double FEBondRelaxationPower::Relaxation(FEMaterialPoint& mp, const double t, co
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationPowerDistortion, FEBondRelaxation)
-    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0");
-    ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER_OR_EQUAL(0.0), "tau1");
-    ADD_PARAMETER(m_beta0, FE_RANGE_GREATER         (0.0), "beta0");
-    ADD_PARAMETER(m_beta1, FE_RANGE_GREATER_OR_EQUAL(0.0), "beta1");
-    ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha");
+    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0" )->setLongName("constant coefficient tau0")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER_OR_EQUAL(0.0), "tau1" )->setLongName("power coefficient tau1")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_beta0, FE_RANGE_GREATER         (0.0), "beta0")->setLongName("constant coefficient beta0");
+    ADD_PARAMETER(m_beta1, FE_RANGE_GREATER_OR_EQUAL(0.0), "beta1")->setLongName("power coefficient beta1");
+    ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha")->setLongName("power exponent alpha");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -478,7 +479,7 @@ double FEBondRelaxationPowerDistUser::Relaxation(FEMaterialPoint& mp, const doub
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationCarreau, FEBondRelaxation)
-    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0");
+    ADD_PARAMETER(m_tau0 , FE_RANGE_GREATER         (0.0), "tau0")->setUnits(UNIT_TIME);
     ADD_PARAMETER(m_lam  , FE_RANGE_GREATER_OR_EQUAL(0.0), "lambda");
     ADD_PARAMETER(m_n    , FE_RANGE_GREATER         (0.0), "n");
 END_FECORE_CLASS();
@@ -521,18 +522,18 @@ double FEBondRelaxationCarreau::Relaxation(FEMaterialPoint& mp, const double t, 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationProny, FEBondRelaxation)
     // material parameters
-    ADD_PARAMETER(m_t[0], FE_RANGE_GREATER_OR_EQUAL(0.0), "t1");
-    ADD_PARAMETER(m_t[1], FE_RANGE_GREATER_OR_EQUAL(0.0), "t2");
-    ADD_PARAMETER(m_t[2], FE_RANGE_GREATER_OR_EQUAL(0.0), "t3");
-    ADD_PARAMETER(m_t[3], FE_RANGE_GREATER_OR_EQUAL(0.0), "t4");
-    ADD_PARAMETER(m_t[4], FE_RANGE_GREATER_OR_EQUAL(0.0), "t5");
-    ADD_PARAMETER(m_t[5], FE_RANGE_GREATER_OR_EQUAL(0.0), "t6");
-    ADD_PARAMETER(m_g[0], FE_RANGE_CLOSED(0.0, 1.0)     , "g1");
-    ADD_PARAMETER(m_g[1], FE_RANGE_CLOSED(0.0, 1.0)     , "g2");
-    ADD_PARAMETER(m_g[2], FE_RANGE_CLOSED(0.0, 1.0)     , "g3");
-    ADD_PARAMETER(m_g[3], FE_RANGE_CLOSED(0.0, 1.0)     , "g4");
-    ADD_PARAMETER(m_g[4], FE_RANGE_CLOSED(0.0, 1.0)     , "g5");
-    ADD_PARAMETER(m_g[5], FE_RANGE_CLOSED(0.0, 1.0)     , "g6");
+    ADD_PARAMETER(m_t[0], FE_RANGE_GREATER_OR_EQUAL(0.0), "t1")->setLongName("relaxation time t1")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t[1], FE_RANGE_GREATER_OR_EQUAL(0.0), "t2")->setLongName("relaxation time t2")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t[2], FE_RANGE_GREATER_OR_EQUAL(0.0), "t3")->setLongName("relaxation time t3")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t[3], FE_RANGE_GREATER_OR_EQUAL(0.0), "t4")->setLongName("relaxation time t4")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t[4], FE_RANGE_GREATER_OR_EQUAL(0.0), "t5")->setLongName("relaxation time t5")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t[5], FE_RANGE_GREATER_OR_EQUAL(0.0), "t6")->setLongName("relaxation time t6")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_g[0], FE_RANGE_CLOSED(0.0, 1.0)     , "g1")->setLongName("coefficient g1");
+    ADD_PARAMETER(m_g[1], FE_RANGE_CLOSED(0.0, 1.0)     , "g2")->setLongName("coefficient g2");
+    ADD_PARAMETER(m_g[2], FE_RANGE_CLOSED(0.0, 1.0)     , "g3")->setLongName("coefficient g3");
+    ADD_PARAMETER(m_g[3], FE_RANGE_CLOSED(0.0, 1.0)     , "g4")->setLongName("coefficient g4");
+    ADD_PARAMETER(m_g[4], FE_RANGE_CLOSED(0.0, 1.0)     , "g5")->setLongName("coefficient g5");
+    ADD_PARAMETER(m_g[5], FE_RANGE_CLOSED(0.0, 1.0)     , "g6")->setLongName("coefficient g6");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -578,9 +579,9 @@ double FEBondRelaxationProny::Relaxation(FEMaterialPoint& mp, const double t, co
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationMalkin, FEBondRelaxation)
-ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER(0.0), "tau1");
-ADD_PARAMETER(m_tau2 , FE_RANGE_GREATER(0.0), "tau2");
-ADD_PARAMETER(m_beta , FE_RANGE_GREATER(0.0), "beta");
+ADD_PARAMETER(m_tau1 , FE_RANGE_GREATER(0.0), "tau1")->setLongName("min. relaxation time")->setUnits(UNIT_TIME);
+ADD_PARAMETER(m_tau2 , FE_RANGE_GREATER(0.0), "tau2")->setLongName("max. relaxation time")->setUnits(UNIT_TIME);
+ADD_PARAMETER(m_beta , FE_RANGE_GREATER_OR_EQUAL(1.0), "beta")->setLongName("power exponent");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -602,16 +603,10 @@ double FEBondRelaxationMalkin::Relaxation(FEMaterialPoint& mp, const double t, c
     
     if (beta != 1) {
         double bm1 = beta - 1;
-#ifdef __APPLE__
-        double Ga = tgamma(bm1);
-#else
-        double Ga = gamma(bm1);
-#endif
         double Q1 = gamma_inc_Q(bm1, t/tau1);
-        double G1 = Ga*Q1;
+        double den = pow(tau1,-bm1) - pow(tau2,-bm1);
         double Q2 = gamma_inc_Q(bm1, t/tau2);
-        double G2 = Ga*Q2;
-        g = bm1*pow(t,-bm1)/(pow(tau1, -bm1) - pow(tau2, -bm1))*(G2-G1);
+        g = bm1*pow(t,-bm1)*(Q2-Q1)/den;
     }
     else {
         g = (expint_Ei(-t/tau2) - expint_Ei(-t/tau1))/(log(tau1/tau2));
@@ -627,13 +622,13 @@ double FEBondRelaxationMalkin::Relaxation(FEMaterialPoint& mp, const double t, c
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationMalkinDist, FEBondRelaxation)
-    ADD_PARAMETER(m_t1c0 , FE_RANGE_GREATER(0.0), "t1c0");
-    ADD_PARAMETER(m_t1c1 , "t1c1");
-    ADD_PARAMETER(m_t1s0 , FE_RANGE_GREATER(0.0), "t1s0");
-    ADD_PARAMETER(m_t2c0 , FE_RANGE_GREATER(0.0), "t2c0");
-    ADD_PARAMETER(m_t2c1 , "t2c1");
-    ADD_PARAMETER(m_t2s0 , FE_RANGE_GREATER(0.0), "t2s0");
-    ADD_PARAMETER(m_beta , FE_RANGE_GREATER(0.0), "beta");
+    ADD_PARAMETER(m_t1c0 , FE_RANGE_GREATER(0.0), "t1c0")->setLongName("constant for tau1")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t1c1 , "t1c1")->setLongName("coefficient for tau1")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t1s0 , FE_RANGE_GREATER(0.0), "t1s0")->setLongName("strain for tau1");
+    ADD_PARAMETER(m_t2c0 , FE_RANGE_GREATER(0.0), "t2c0")->setLongName("constant for tau2")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t2c1 , "t2c1")->setLongName("coefficient for tau2")->setUnits(UNIT_TIME);
+    ADD_PARAMETER(m_t2s0 , FE_RANGE_GREATER(0.0), "t2s0")->setLongName("strain for tau2");
+    ADD_PARAMETER(m_beta , FE_RANGE_GREATER(0.0), "beta")->setLongName("power exponent beta");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -671,16 +666,10 @@ double FEBondRelaxationMalkinDist::Relaxation(FEMaterialPoint& mp, const double 
     
     if (beta != 1) {
         double bm1 = beta - 1;
-#ifdef __APPLE__
-        double Ga = tgamma(bm1);
-#else
-        double Ga = gamma(bm1);
-#endif
         double Q1 = gamma_inc_Q(bm1, t/tau1);
-        double G1 = Ga*Q1;
+        double den = pow(tau1,-bm1) - pow(tau2,-bm1);
         double Q2 = gamma_inc_Q(bm1, t/tau2);
-        double G2 = Ga*Q2;
-        g = bm1*pow(t,-bm1)/(pow(tau1, -bm1) - pow(tau2, -bm1))*(G2-G1);
+        g = bm1*pow(t,-bm1)*(Q2-Q1)/den;
     }
     else {
         g = (expint_Ei(-t/tau2) - expint_Ei(-t/tau1))/(log(tau1/tau2));
@@ -742,16 +731,10 @@ double FEBondRelaxationMalkinDistUser::Relaxation(FEMaterialPoint& mp, const dou
     
     if (beta != 1) {
         double bm1 = beta - 1;
-#ifdef __APPLE__
-        double Ga = tgamma(bm1);
-#else
-        double Ga = gamma(bm1);
-#endif
         double Q1 = gamma_inc_Q(bm1, t/tau1);
-        double G1 = Ga*Q1;
+        double den = pow(tau1,-bm1) - pow(tau2,-bm1);
         double Q2 = gamma_inc_Q(bm1, t/tau2);
-        double G2 = Ga*Q2;
-        g = bm1*pow(t,-bm1)/(pow(tau1, -bm1) - pow(tau2, -bm1))*(G2-G1);
+        g = bm1*pow(t,-bm1)*(Q2-Q1)/den;
     }
     else {
         g = (expint_Ei(-t/tau2) - expint_Ei(-t/tau1))/(log(tau1/tau2));
@@ -767,7 +750,7 @@ double FEBondRelaxationMalkinDistUser::Relaxation(FEMaterialPoint& mp, const dou
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBondRelaxationCSexp, FEBondRelaxation)
-ADD_PARAMETER(m_tau , FE_RANGE_GREATER(0.0), "tau");
+ADD_PARAMETER(m_tau , FE_RANGE_GREATER(0.0), "tau")->setLongName("exponential spectrum constant")->setUnits(UNIT_TIME);
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------

@@ -29,102 +29,130 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "Timer.h"
 #include <stdio.h>
-#include <time.h>
 #include <string>
+#include <chrono>
+#include "FEModel.h"
+using namespace std::chrono;
 
-//-----------------------------------------------------------------------------
-// Define the data types used for measuring times.
-// This depends on the system
-#ifdef WIN32
-#define TIMER_TYPE clock_t
-#else
-#define TIMER_TYPE	time_t
-#endif
+using dseconds = duration<double>;
 
-//-----------------------------------------------------------------------------
-// forward declaration of the functions to retrieve timing info
-void sys_get_time(TIMER_TYPE& t);
-double sys_diff_time(TIMER_TYPE& t1, TIMER_TYPE& t0);
-
-//-----------------------------------------------------------------------------
-// OS-dependent timing functions
-#ifdef WIN32
-void sys_get_time(TIMER_TYPE& t) { t = clock(); }
-double sys_diff_time(TIMER_TYPE& t1, TIMER_TYPE& t0) { return (double) (t1 - t0) / CLOCKS_PER_SEC; }
-#else
-void sys_get_time(TIMER_TYPE& t) { time(&t); }
-double sys_diff_time(TIMER_TYPE& t1, TIMER_TYPE& t0) { return difftime(t1, t0); }
-#endif
-
-//-----------------------------------------------------------------------------
 // data storing timing info
-struct	timer_data {
-	TIMER_TYPE	m_start;	//!< time at start
-	TIMER_TYPE	m_stop;		//!< time at last stop
+struct	Timer::Imp {
+	time_point<steady_clock>	start;	//!< time at start
+	time_point<steady_clock>	stop;	//!< time at last stop
+	time_point<steady_clock>	pause;	//!< time when paused
+
+	bool	isRunning = false;	//!< flag indicating whether start was called
+	dseconds total; //!< total accumulated time (between start and stop)
+
+	bool isPaused = false;
+	dseconds paused; //!< accumulated time while paused
+
+	Timer* parent = nullptr; // the timer that was active when this timer starts
+
+	bool track = true;
+
+	static Timer* activeTimer;
 };
 
-//-----------------------------------------------------------------------------
-Timer::Timer()
+Timer* Timer::Imp::activeTimer = nullptr;
+
+Timer::Timer(bool isTracked)
 {
-	m_pimpl = new timer_data;
-	reset(); 
+	m = new Imp;
+	m->track = isTracked;
+	reset();
 }
 
-//-----------------------------------------------------------------------------
 Timer::~Timer()
 {
-	delete (timer_data*)m_pimpl;
+	if (Imp::activeTimer == this) Imp::activeTimer = nullptr;
+	delete m;
 }
 
-//-----------------------------------------------------------------------------
+Timer* Timer::activeTimer()
+{
+	return Imp::activeTimer;
+}
+
 void Timer::start()
 {
-	timer_data& t = *(static_cast<timer_data*>(m_pimpl));
-	sys_get_time(t.m_start);
-	m_brunning = true;
+	m->parent = (m->track ? m->activeTimer : nullptr);
+	if (m->parent) m->parent->pause();
+	if (m->track) m->activeTimer = this;
+	m->start = steady_clock::now();
+	assert(m->isRunning == false);
+	m->isRunning = true;
 }
 
-//-----------------------------------------------------------------------------
 void Timer::stop()
 {
-	timer_data& t = *(static_cast<timer_data*>(m_pimpl));
-	sys_get_time(t.m_stop);
-	m_brunning = false;
+	m->stop = steady_clock::now();
+	assert(m->isRunning == true);
+	m->isRunning = false;
+	m->total += m->stop - m->start;
 
-	m_sec += sys_diff_time(t.m_stop, t.m_start);
+	if (m->track)
+	{
+		assert(m->activeTimer == this);
+		m->activeTimer = m->parent;
+		if (m->parent) m->parent->unpause();
+	}
 }
 
-//-----------------------------------------------------------------------------
+void Timer::pause()
+{
+	assert(!m->isPaused);
+	m->pause = steady_clock::now();
+	m->isPaused = true;
+}
+
+void Timer::unpause()
+{
+	assert(m->isPaused);
+	auto tmp = steady_clock::now();
+	m->paused += tmp - m->pause;
+	m->isPaused = false;
+}
+
 void Timer::reset()
 {
-	m_sec = 0;
-	m_brunning = false;
+	m->total = dseconds(0);
+	m->paused = dseconds(0);
+	m->isRunning = false;
+	m->isPaused = false;
+	m->parent = nullptr;
+	if (m->activeTimer == this) m->activeTimer = nullptr;
 }
 
-//-----------------------------------------------------------------------------
+bool Timer::isRunning() const { return m->isRunning; }
+
 double Timer::peek()
 {
-	if (m_brunning)
+	if (m->isRunning)
 	{
-		TIMER_TYPE pause;
-		sys_get_time(pause);
-		timer_data& t = *(static_cast<timer_data*>(m_pimpl));
-		return m_sec + sys_diff_time(pause, t.m_start);
+		time_point<steady_clock> tmp = steady_clock::now();
+		return duration_cast<dseconds>(m->total + (tmp - m->start)).count();
 	}
 	else 
 	{
-		return m_sec;
+		return m->total.count();
 	}
 }
 
-//-----------------------------------------------------------------------------
 void Timer::GetTime(int& nhour, int& nmin, int& nsec)
 {
-	double sec = (m_brunning? peek() : m_sec);
+	double sec = peek();
 	GetTime(sec, nhour, nmin, nsec);
 }
 
-//-----------------------------------------------------------------------------
+double Timer::GetExclusiveTime()
+{
+	assert(!m->isPaused);
+	double sec = peek() - m->paused.count();
+	return sec;
+}
+
 void Timer::GetTime(double fsec, int& nhour, int& nmin, int& nsec)
 {
 	nhour = (int) (fsec / 3600.0); fsec -= nhour*3600;
@@ -132,24 +160,24 @@ void Timer::GetTime(double fsec, int& nhour, int& nmin, int& nsec)
 	nsec  = (int) (fsec + 0.5);
 }
 
-//-----------------------------------------------------------------------------
 double Timer::GetTime()
 {
-	return (m_brunning? peek() : m_sec);
+	return (m->isRunning? peek() : m->total.count());
 }
 
-//-----------------------------------------------------------------------------
 void Timer::time_str(char* sz)
 {
 	int nhour, nmin, nsec;
 	GetTime(nhour, nmin, nsec);
-	sprintf(sz, "%d:%02d:%02d", nhour, nmin, nsec);
+	snprintf(sz, 64, "%d:%02d:%02d", nhour, nmin, nsec);
 }
 
-//-----------------------------------------------------------------------------
 void Timer::time_str(double fsec, char* sz)
 {
 	int nhour, nmin, nsec;
 	GetTime(fsec, nhour, nmin, nsec);
-	sprintf(sz, "%d:%02d:%02d", nhour, nmin, nsec);
+	snprintf(sz, 64, "%d:%02d:%02d", nhour, nmin, nsec);
 }
+
+//============================================================================
+TimerTracker::TimerTracker(FEModel* fem, int timerId) : TimerTracker(fem->CollectTimings() ? fem->GetTimer(timerId) : nullptr) {}

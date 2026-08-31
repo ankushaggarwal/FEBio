@@ -35,7 +35,8 @@ class DumpStream;
 // Class to control the time step
 class FECORE_API FETimeStepController : public FECoreBase
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FETIMECONTROLLER_ID)
+	FECORE_BASE_CLASS(FETimeStepController)
 
 public:
 	FETimeStepController(FEModel* fem);
@@ -83,7 +84,7 @@ public:
 	bool				m_mp_repeat;	//!< repeat must-points
 	double				m_mp_toff;		//!< offset for repeat must-points
 
-private:
+public:
 	double	m_ddt;			//!< used by auto-time stepper
 	double	m_dtp;			//!< previous time step size
 

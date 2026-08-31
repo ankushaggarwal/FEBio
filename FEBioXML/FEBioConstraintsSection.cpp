@@ -25,16 +25,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #include "stdafx.h"
 #include "FEBioConstraintsSection.h"
-#include "FEBioMech/FERigidMaterial.h"
-#include "FEBioMech/FEPointConstraint.h"
-#include "FEBioMech/FERigidForce.h"
 #include "FECore/FEModel.h"
 #include "FECore/FECoreKernel.h"
-#include <FEBioMech/RigidBC.h>
-#include <FEBioMech/FEDiscreteContact.h>
 #include <FECore/FESurfaceConstraint.h>
+#include <FECore/FEBodyConstraint.h>
 #include <FECore/FENodeSetConstraint.h>
-#include <FECore/FESurfacePairConstraintNL.h>
+#include <FECore/FEModelLoad.h>
+#include <FECore/FEMesh.h>
+#include <FECore/FESurface.h>
+#include <FECore/FEBoundaryCondition.h>
+#include <FECore/FEInitialCondition.h>
 
 void FEBioConstraintsSection1x::Parse(XMLTag &tag)
 {
@@ -85,12 +85,10 @@ void FEBioConstraintsSection1x::Parse(XMLTag &tag)
 				const char* szname = tag.AttributeValue("name", true);
 				if (szname) plc->SetName(szname);
 
-				FEParameterList& pl = plc->GetParameterList();
-
 				++tag;
 				do
 				{
-					if (ReadParameter(tag, pl) == false)
+					if (ReadParameter(tag, plc) == false)
 					{
 						if (tag == "surface")
 						{
@@ -185,12 +183,10 @@ void FEBioConstraintsSection2::Parse(XMLTag &tag)
 				const char* szname = tag.AttributeValue("name", true);
 				if (szname) plc->SetName(szname);
 
-				FEParameterList& pl = plc->GetParameterList();
-
 				++tag;
 				do
 				{
-					if (ReadParameter(tag, pl) == false)
+					if (ReadParameter(tag, plc) == false)
 					{
 						if (tag == "surface")
 						{
@@ -292,27 +288,22 @@ void FEBioConstraintsSection25::Parse(XMLTag &tag)
 					const char* szsurf = tag.AttributeValue("surface");
 					FEFacetSet* pface = mesh.FindFacetSet(szsurf);
 					if (pface == 0) throw XMLReader::InvalidAttributeValue(tag, "surface", szsurf);
-					if (GetBuilder()->BuildSurface(*psurf, *pface, true) == false) throw XMLReader::InvalidAttributeValue(tag, "surface", szsurf);
+					if (GetBuilder()->BuildSurface(*psurf, *pface, psc->UseNodalIntegration()) == false) throw XMLReader::InvalidAttributeValue(tag, "surface", szsurf);
 				}
 
-				// get the nodeset (this is needed by FEDiscreteContact)
-				if (dynamic_cast<FEDiscreteContact*>(plc))
+				// get the element set
+				FEBodyConstraint* pbc = dynamic_cast<FEBodyConstraint*>(plc);
+				if (pbc)
 				{
-					FEDiscreteContact* pdc = dynamic_cast<FEDiscreteContact*>(plc);
-					const char* szdset = tag.AttributeValue("discrete_set");
-					FEDiscreteSet* pset = mesh.FindDiscreteSet(szdset);
-					if (pset == 0) throw XMLReader::InvalidAttributeValue(tag, "discrete_set", szdset);
-					pdc->SetDiscreteSet(pset);
-				}
-
-				// get the nodeset (this is needed by FEDiscreteContact2)
-				if (dynamic_cast<FEDiscreteContact2*>(plc))
-				{
-					FEDiscreteContact2* pdc = dynamic_cast<FEDiscreteContact2*>(plc);
-					const char* szdset = tag.AttributeValue("discrete_set");
-					FEDeformableSpringDomain2* pdom = dynamic_cast<FEDeformableSpringDomain2*>(mesh.FindDomain(szdset));
-					if (pdom == 0) throw XMLReader::InvalidAttributeValue(tag, "discrete_set", szdset);
-					pdc->SetDiscreteDomain(pdom);
+					// see if a specific domain was referenced
+					const char* szpart = tag.AttributeValue("elem_set", true);
+					if (szpart)
+					{
+						FEMesh& mesh = fem.GetMesh();
+						FEElementSet* elset = mesh.FindElementSet(szpart);
+						if (elset == 0) throw XMLReader::InvalidAttributeValue(tag, "elem_set", szpart);
+						pbc->SetDomainList(elset);
+					}
 				}
 
                 // get the nodeset for other constraints
@@ -327,26 +318,6 @@ void FEBioConstraintsSection25::Parse(XMLTag &tag)
                     pnset->Add(pset->GetNodeList());
                 }
 
-                // get the surface pair
-                FESurfacePairConstraintNL* pspc = dynamic_cast<FESurfacePairConstraintNL*>(plc);
-                if (pspc && pspc->GetPrimarySurface() && pspc->GetSecondarySurface())
-                {
-                    // get the surface pair
-                    const char* szpair = tag.AttributeValue("surface_pair");
-                    FESurfacePair* surfacePair =mesh.FindSurfacePair(szpair);
-                    if (surfacePair == 0) throw XMLReader::InvalidAttributeValue(tag, "surface_pair", szpair);
-                    
-                    // build the surfaces
-                    if (GetBuilder()->BuildSurface(*pspc->GetSecondarySurface(), *surfacePair->GetSecondarySurface(), pspc->UseNodalIntegration()) == false) throw XMLReader::InvalidAttributeValue(tag, "surface_pair", szpair);
-                    if (GetBuilder()->BuildSurface(*pspc->GetPrimarySurface(), *surfacePair->GetPrimarySurface(), pspc->UseNodalIntegration()) == false) throw XMLReader::InvalidAttributeValue(tag, "surface_pair", szpair);
-
-                    // Make sure we have both surfaces
-                    FESurface* pss = pspc->GetPrimarySurface (); if ((pss == 0) || (pss->Elements()==0)) throw XMLReader::MissingAttribute(tag,"Missing constraint primary surface");
-                    mesh.AddSurface(pss);
-                    FESurface* pms = pspc->GetSecondarySurface(); if ((pms == 0) || (pms->Elements()==0)) throw XMLReader::MissingAttribute(tag,"Missing constraint secondary surface");
-                    mesh.AddSurface(pms);
-                }
-                
 				// read the parameter list
 				ReadParameterList(tag, plc);
 
@@ -364,6 +335,7 @@ void FEBioConstraintsSection25::Parse(XMLTag &tag)
 void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 {
 	FEModel& fem = *GetFEModel();
+	FEModelBuilder& feb = *GetBuilder();
 
 	const char* szm = tag.AttributeValue("mat");
 	assert(szm);
@@ -371,10 +343,6 @@ void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 	// get the material ID
 	int nmat = atoi(szm);
 	if ((nmat <= 0) || (nmat > fem.Materials())) throw XMLReader::InvalidAttributeValue(tag, "mat", szm);
-
-	// make sure this is a valid rigid material
-	FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(fem.GetMaterial(nmat-1));
-	if (pm == 0) throw XMLReader::InvalidAttributeValue(tag, "mat", szm);
 
 	++tag;
 	do
@@ -403,38 +371,52 @@ void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 					else throw XMLReader::InvalidAttributeValue(tag, "relative", szrel);
 				}
 
-				FERigidBodyDisplacement* pDC = static_cast<FERigidBodyDisplacement*>(fecore_new<FERigidBC>("rigid_prescribed", &fem));
-				pDC->SetID(nmat);
-				pDC->SetBC(bc);
-				pDC->SetRelativeFlag(brel);
-
 				double val = 0.0;
 				value(tag, val);
-				pDC->SetValue(val);
+
+				FEStepComponent* pDC = fecore_new_class<FEBoundaryCondition>("FERigidPrescribedOld", &fem);
+				feb.AddRigidComponent(pDC);
+
+				pDC->SetParameter("rb", nmat);
+				pDC->SetParameter("dof", bc);
+				pDC->SetParameter("relative", brel);
+				pDC->SetParameter("value", val);
 
 				// assign a load curve
 				if (lc >= 0)
 				{
 					FEParam* p = pDC->GetParameter("value");
 					if (p == nullptr) throw XMLReader::InvalidTag(tag);
-					GetFEModel()->AttachLoadController(p, lc);
+					fem.AttachLoadController(p, lc);
 				}
-
-				// add this boundary condition to the current step
-				GetBuilder()->AddRigidPrescribedBC(pDC);
 			}
 			else if (strcmp(szt, "force") == 0)
 			{
 				const char* szlc = tag.AttributeValue("lc");
 				int lc = atoi(szlc) - 1;
 
-				FERigidBodyForce* pFC = static_cast<FERigidBodyForce*>(fecore_new<FEModelLoad>(FEBC_ID, "rigid_force",  &fem));
-				pFC->SetRigidMaterialID(nmat);
-				pFC->SetDOF(bc);
-
 				double val = 0.0;
 				value(tag, val);
-				pFC->SetForce(val);
+
+				FEModelLoad* pFC = nullptr;
+				
+				if (bc < 3)
+				{
+					pFC = fecore_new<FEModelLoad>("rigid_force", &fem);
+
+					pFC->SetParameter("rb", nmat);
+					pFC->SetParameter("dof", bc);
+					pFC->SetParameter("value", val);
+				}
+				else
+				{
+					pFC = fecore_new<FEModelLoad>("rigid_moment", &fem);
+
+					pFC->SetParameter("rb", nmat);
+					pFC->SetParameter("dof", bc - 3);
+					pFC->SetParameter("value", val);
+				}
+				feb.AddModelLoad(pFC);
 
 				if (lc >= 0)
 				{
@@ -442,18 +424,16 @@ void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 					if (p == nullptr) throw XMLReader::InvalidTag(tag);
 					GetFEModel()->AttachLoadController(p, lc);
 				}
-
-				// add this boundary condition to the current step
-				GetBuilder()->AddModelLoad(pFC);
 			}
 			else if (strcmp(szt, "fixed") == 0)
 			{
-				FERigidBodyFixedBC* pBC = static_cast<FERigidBodyFixedBC*>(fecore_new<FERigidBC>("rigid_fixed",  &fem));
-				pBC->m_rigidMat = nmat;
-				pBC->m_dofs.push_back(bc);
+				FEStepComponent* pBC = fecore_new_class<FEBoundaryCondition>("FERigidFixedBCOld", &fem);
+				feb.AddRigidComponent(pBC);
 
-				// add this boundary condition to the current step
-				GetBuilder()->AddRigidFixedBC(pBC);
+				pBC->SetParameter("rb", nmat);
+
+				vector<int> dofs; dofs.push_back(bc);
+				pBC->SetParameter("dofs", dofs);
 			}
 			else throw XMLReader::InvalidAttributeValue(tag, "type", szt);
 		}
@@ -472,37 +452,43 @@ void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 				const char* szlc = tag.AttributeValue("lc");
 				int lc = atoi(szlc) - 1;
 
-				FERigidBodyDisplacement* pDC = static_cast<FERigidBodyDisplacement*>(fecore_new<FERigidBC>("rigid_prescribed", &fem));
-				pDC->SetID(nmat);
-				pDC->SetBC(bc);
-
 				double val = 0.0;
 				value(tag, val);
-				pDC->SetValue(val);
 
-				// assign a load curve
-				if (lc >= 0)
-				{
-					FEParam* p = pDC->GetParameter("value");
-					if (p == nullptr) throw XMLReader::InvalidTag(tag);
-					GetFEModel()->AttachLoadController(p, lc);
-				}
+				FEStepComponent* pDC = fecore_new_class<FEBoundaryCondition>("FERigidPrescribedOld", &fem);
+				feb.AddRigidComponent(pDC);
 
-				// add this boundary condition to the current step
-				GetBuilder()->AddRigidPrescribedBC(pDC);
+				pDC->SetParameter("rb", nmat);
+				pDC->SetParameter("dof", bc);
+				pDC->SetParameter("value", val);
 			}
 			else if (strcmp(szt, "force") == 0)
 			{
 				const char* szlc = tag.AttributeValue("lc");
 				int lc = atoi(szlc) - 1;
 
-				FERigidBodyForce* pFC = static_cast<FERigidBodyForce*>(fecore_new<FEModelLoad>(FEBC_ID, "rigid_force",  &fem));
-				pFC->SetRigidMaterialID(nmat);
-				pFC->SetDOF(bc);
-
 				double val = 0.0;
 				value(tag, val);
-				pFC->SetForce(val);
+
+				FEModelLoad* pFC = nullptr;
+
+				if (bc < 3)
+				{
+					pFC = fecore_new<FEModelLoad>("rigid_force", &fem);
+
+					pFC->SetParameter("rb", nmat);
+					pFC->SetParameter("dof", bc);
+					pFC->SetParameter("value", val);
+				}
+				else
+				{
+					pFC = fecore_new<FEModelLoad>("rigid_moment", &fem);
+
+					pFC->SetParameter("rb", nmat);
+					pFC->SetParameter("dof", bc - 3);
+					pFC->SetParameter("value", val);
+				}
+				feb.AddModelLoad(pFC);
 
 				if (lc >= 0)
 				{
@@ -510,18 +496,16 @@ void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 					if (p == nullptr) throw XMLReader::InvalidTag(tag);
 					GetFEModel()->AttachLoadController(p, lc);
 				}
-
-				// add this boundary condition to the current step
-				GetBuilder()->AddModelLoad(pFC);
 			}
 			else if (strcmp(szt, "fixed") == 0)
 			{
-				FERigidBodyFixedBC* pBC = static_cast<FERigidBodyFixedBC*>(fecore_new<FERigidBC>("rigid_fixed",  &fem));
-				pBC->m_rigidMat = nmat;
-				pBC->m_dofs.push_back(bc);
+				FEStepComponent* pBC = fecore_new_class<FEBoundaryCondition>("FERigidFixedBCOld", &fem);
+				feb.AddRigidComponent(pBC);
 
-				// add this boundary condition to the current step
-				GetBuilder()->AddRigidFixedBC(pBC);
+				pBC->SetParameter("rb", nmat);
+
+				vector<int> dofs; dofs.push_back(bc);
+				pBC->SetParameter("dofs", dofs);
 			}
 			else throw XMLReader::InvalidAttributeValue(tag, "type", szt);
 		}
@@ -535,6 +519,7 @@ void FEBioConstraintsSection1x::ParseRigidConstraint(XMLTag& tag)
 void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 {
 	FEModel& fem = *GetFEModel();
+	FEModelBuilder& feb = *GetBuilder();
 
 	const char* szm = tag.AttributeValue("mat");
 	assert(szm);
@@ -542,10 +527,6 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 	// get the material ID
 	int nmat = atoi(szm);
 	if ((nmat <= 0) || (nmat > fem.Materials())) throw XMLReader::InvalidAttributeValue(tag, "mat", szm);
-
-	// make sure this is a valid rigid material
-	FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(fem.GetMaterial(nmat-1));
-	if (pm == 0) throw XMLReader::InvalidAttributeValue(tag, "mat", szm);
 
 	++tag;
 	do
@@ -577,15 +558,16 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 				else throw XMLReader::InvalidAttributeValue(tag, "type", szrel);
 			}
 
-			// create the rigid displacement constraint
-			FERigidBodyDisplacement* pDC = static_cast<FERigidBodyDisplacement*>(fecore_new<FERigidBC>("rigid_prescribed", &fem));
-			pDC->SetID(nmat);
-			pDC->SetBC(bc);
-			pDC->SetRelativeFlag(brel);
-
 			double val = 0.0;
 			value(tag, val);
-			pDC->SetValue(val);
+
+			FEStepComponent* pDC = fecore_new_class<FEBoundaryCondition>("FERigidPrescribedOld", &fem);
+			feb.AddRigidComponent(pDC);
+
+			pDC->SetParameter("rb", nmat);
+			pDC->SetParameter("dof", bc);
+			pDC->SetParameter("relative", brel);
+			pDC->SetParameter("value", val);
 
 			// assign a load curve
 			if (lc >= 0)
@@ -594,9 +576,6 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 				if (p == nullptr) throw XMLReader::InvalidTag(tag);
 				GetFEModel()->AttachLoadController(p, lc);
 			}
-
-			// add this boundary condition to the current step
-			GetBuilder()->AddRigidPrescribedBC(pDC);
 		}
 		else if (tag == "force")
 		{
@@ -612,12 +591,12 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 			else throw XMLReader::InvalidAttributeValue(tag, "bc", szbc);
 
 			// get the type
-			int ntype = FERigidBodyForce::FORCE_LOAD;
+			int ntype = 0; // FERigidBodyForce::FORCE_LOAD;
 			const char* sztype = tag.AttributeValue("type", true);
 			if (sztype)
 			{
-				if      (strcmp(sztype, "ramp"  ) == 0) ntype = FERigidBodyForce::FORCE_TARGET;
-				else if (strcmp(sztype, "follow") == 0) ntype = FERigidBodyForce::FORCE_FOLLOW;
+				if      (strcmp(sztype, "ramp"  ) == 0) ntype = 2; //FERigidBodyForce::FORCE_TARGET;
+				else if (strcmp(sztype, "follow") == 0) ntype = 1; //FERigidBodyForce::FORCE_FOLLOW;
 				else throw XMLReader::InvalidAttributeValue(tag, "type", sztype);
 			}
 
@@ -629,15 +608,30 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 			// make sure there is a loadcurve for type=0 forces
 			if ((ntype == 0)&&(lc==-1)) throw XMLReader::MissingAttribute(tag, "lc");
 
-			// create the rigid body force
-			FERigidBodyForce* pFC = static_cast<FERigidBodyForce*>(fecore_new<FEModelLoad>(FEBC_ID, "rigid_force",  &fem));
-			pFC->SetLoadType(ntype);
-			pFC->SetRigidMaterialID(nmat);
-			pFC->SetDOF(bc);
-
 			double val = 0.0;
 			value(tag, val);
-			pFC->SetForce(val);
+
+			// create the rigid body force
+			FEModelLoad* pFC = nullptr;
+
+			if (bc < 3)
+			{
+				pFC = fecore_new<FEModelLoad>("rigid_force", &fem);
+
+				pFC->SetParameter("load_type", ntype);
+				pFC->SetParameter("rb", nmat);
+				pFC->SetParameter("dof", bc);
+				pFC->SetParameter("value", val);
+			}
+			else
+			{
+				pFC = fecore_new<FEModelLoad>("rigid_moment", &fem);
+
+				pFC->SetParameter("rb", nmat);
+				pFC->SetParameter("dof", bc - 3);
+				pFC->SetParameter("value", val);
+			}
+			feb.AddModelLoad(pFC);
 
 			if (lc >= 0)
 			{
@@ -645,9 +639,6 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 				if (p == nullptr) throw XMLReader::InvalidTag(tag);
 				GetFEModel()->AttachLoadController(p, lc);
 			}
-
-			// add this boundary condition to the current step
-			GetBuilder()->AddModelLoad(pFC);
 		}
 		else if (tag == "fixed")
 		{
@@ -662,13 +653,13 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 			else if (strcmp(szbc, "Rz") == 0) bc = 5;
 			else throw XMLReader::InvalidAttributeValue(tag, "bc", szbc);
 
-			// create the fixed dof
-			FERigidBodyFixedBC* pBC = static_cast<FERigidBodyFixedBC*>(fecore_new<FERigidBC>("rigid_fixed",  &fem));
-			pBC->m_rigidMat = nmat;
-			pBC->m_dofs.push_back(bc);
+			FEStepComponent* pBC = fecore_new_class<FEBoundaryCondition>("FERigidFixedBCOld", &fem);
+			feb.AddRigidComponent(pBC);
 
-			// add this boundary condition to the current step
-			GetBuilder()->AddRigidFixedBC(pBC);
+			pBC->SetParameter("rb", nmat);
+
+			vector<int> dofs; dofs.push_back(bc);
+			pBC->SetParameter("dofs", dofs);
 		}
 		else if (tag == "initial_velocity")
 		{
@@ -677,12 +668,12 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 			value(tag, v);
 
 			// create the initial condition
-			FERigidBodyVelocity* pic = fecore_alloc(FERigidBodyVelocity, &fem);
-			pic->m_rid = nmat;
-			pic->m_vel = v;
+			FEStepComponent* pic = fecore_new_class<FEInitialCondition>("FERigidBodyVelocity", &fem);
+			pic->SetParameter("rb", nmat);
+			pic->SetParameter("value", v);
 
 			// add this initial condition to the current step
-			GetBuilder()->AddRigidIC(pic);
+			feb.AddRigidComponent(pic);
 		}
 		else if (tag == "initial_angular_velocity")
 		{
@@ -691,12 +682,12 @@ void FEBioConstraintsSection2::ParseRigidConstraint20(XMLTag& tag)
 			value(tag, w);
 
 			// create the initial condition
-			FERigidBodyAngularVelocity* pic = fecore_alloc(FERigidBodyAngularVelocity, &fem);
-			pic->m_rid = nmat;
-			pic->m_w = w;
+			FEStepComponent* pic = fecore_new_class<FEInitialCondition>("FERigidBodyAngularVelocity", &fem);
+			pic->SetParameter("rb", nmat);
+			pic->SetParameter("value", w);
 
-			// add this initial condition to the current step
-			GetBuilder()->AddRigidIC(pic);
+			// add to model
+			feb.AddRigidComponent(pic);
 		}
 		else throw XMLReader::InvalidTag(tag);
 		++tag;
@@ -773,7 +764,7 @@ bool FEBioConstraintsSection::ParseSurfaceSection(XMLTag &tag, FESurface& s, int
 				int nn = pe->GetFace(nf[1]-1, ne);
 				if (nn != N) throw XMLReader::InvalidValue(tag);
 				for (int j=0; j<N; ++j) el.m_node[j] = ne[j];
-				el.m_elem[0] = pe;
+				el.m_elem[0].pe = pe;
 			}
 			else throw XMLReader::InvalidValue(tag);
 		}

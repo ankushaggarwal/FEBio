@@ -30,7 +30,6 @@ SOFTWARE.*/
 #include "FEBiphasicSoluteSolver.h"
 #include "FEBiphasicSoluteDomain.h"
 #include "FEBiphasicDomain.h"
-#include "FETriphasicDomain.h"
 #include <FEBioMech/FEElasticDomain.h>
 #include <FEBioMech/FEResidualVector.h>
 #include <FEBioMech/FESolidLinearSystem.h>
@@ -41,12 +40,7 @@ SOFTWARE.*/
 #include <FECore/FENodalLoad.h>
 #include <FECore/FESurfaceLoad.h>
 #include "FECore/sys.h"
-
-//-----------------------------------------------------------------------------
-// define the parameter list
-BEGIN_FECORE_CLASS(FEBiphasicSoluteSolver, FEBiphasicSolver)
-	ADD_PARAMETER(m_Ctol, "ctol"        );
-END_FECORE_CLASS();
+#include "FEBiphasicSoluteAnalysis.h"
 
 //-----------------------------------------------------------------------------
 FEBiphasicSoluteSolver::FEBiphasicSoluteSolver(FEModel* pfem) : FEBiphasicSolver(pfem), m_dofC(pfem), m_dofD(pfem)
@@ -54,12 +48,6 @@ FEBiphasicSoluteSolver::FEBiphasicSoluteSolver(FEModel* pfem) : FEBiphasicSolver
 	m_Ctol = 0.01;
     
 	m_msymm = REAL_UNSYMMETRIC; // assume non-symmetric stiffness matrix by default
-
-	// Allocate degrees of freedom
-	// (We start with zero concentration degrees of freedom)
-	DOFS& dofs = pfem->GetDOFS();
-	int varC = dofs.AddVariable("concentration", VAR_ARRAY);
-    int varD = dofs.AddVariable("shell concentration", VAR_ARRAY);
 }
 
 //-----------------------------------------------------------------------------
@@ -146,49 +134,32 @@ bool FEBiphasicSoluteSolver::InitEquations()
 }
 
 //-----------------------------------------------------------------------------
-//! calculates the concentrated nodal forces
-void FEBiphasicSoluteSolver::NodalLoads(FEGlobalVector& R, const FETimeInfo& tp)
-{
-	// loop over nodal loads
-	FEModel& fem = *GetFEModel();
-	int NNL = fem.NodalLoads();
-	for (int i=0; i<NNL; ++i)
-	{
-		FENodalDOFLoad& fc = dynamic_cast<FENodalDOFLoad&>(*fem.NodalLoad(i));
-		if (fc.IsActive())
-		{
-			int dof = fc.GetDOF();
-
-			FENodeSet& nset = *fc.GetNodeSet();
-			int N = nset.Size();
-			for (int j = 0; j<N; ++j)
-			{
-				int nid = nset[j];	// node ID
-
-				// get the nodal load value
-				double f = fc.NodeValue(j);
-			
-				// For pressure and concentration loads, multiply by dt
-				// for consistency with evaluation of residual and stiffness matrix
-                bool adjust = false;
-                if ((dof == m_dofP[0]) || (dof == m_dofQ[0])) adjust = true;
-                else if ((m_dofC[0] > -1) && (dof == m_dofC[0])) adjust = true;
-                else if ((m_dofD[0] > -1) && (dof == m_dofD[0])) adjust = true;
-                if (adjust) f *= tp.timeIncrement;
-
-				// assemble into residual
-				R.Assemble(nid, dof, f);
-			}
-		}
-	}
-}
-
-//-----------------------------------------------------------------------------
 //! Prepares the data for the first QN iteration. 
 //!
 void FEBiphasicSoluteSolver::PrepStep()
 {
 	for (int j=0; j<(int)m_nceq.size(); ++j) if (m_nceq[j]) zero(m_Ci[j]);
+
+	// for concentration nodal loads we need to multiply the time step size
+	FEModel& fem = *GetFEModel();
+	for (int i = 0; i < fem.ModelLoads(); ++i)
+	{
+		FENodalDOFLoad* pl = dynamic_cast<FENodalDOFLoad*>(fem.ModelLoad(i));
+		if (pl && pl->IsActive())
+		{
+			bool adjust = false;
+			int dof = pl->GetDOF();
+			if      ((m_dofC[0] > -1) && (dof == m_dofC[0])) adjust = true;
+			else if ((m_dofD[0] > -1) && (dof == m_dofD[0])) adjust = true;
+
+			if (adjust)
+			{
+				pl->SetDtScale(true);
+			}
+		}
+	}
+
+
 	FEBiphasicSolver::PrepStep();
 }
 
@@ -250,6 +221,10 @@ bool FEBiphasicSoluteSolver::Quasin()
 			normEi = fabs(m_ui*m_R0);
 			normDi = fabs(m_di*m_di);
 			normEm = normEi;
+
+			m_residuNorm.norm0 = normRi;
+			m_energyNorm.norm0 = normEi;
+			m_solutionNorm[0].norm0 = normDi;
 		}
 
 		// update all degrees of freedom
@@ -263,6 +238,10 @@ bool FEBiphasicSoluteSolver::Quasin()
 		normd  = (m_di*m_di)*(s*s);
 		normD  = m_Di*m_Di;
 		normE1 = s*fabs(m_ui*m_R1);
+
+		m_residuNorm.norm = normR1;
+		m_energyNorm.norm = normE1;
+		m_solutionNorm[0].norm = normd;
 
 		// check residual norm
 		if ((m_Rtol > 0) && (normR1 > m_Rtol*normRi)) bconv = false;	
@@ -416,7 +395,7 @@ bool FEBiphasicSoluteSolver::Residual(vector<double>& R)
 	const FETimeInfo& tp = fem.GetTime();
 
 	// initialize residual with concentrated nodal loads
-	R = m_Fn;
+	zero(R);
 
 	// zero nodal reaction forces
 	zero(m_Fr);
@@ -437,21 +416,14 @@ bool FEBiphasicSoluteSolver::Residual(vector<double>& R)
         FEElasticDomain* ped = dynamic_cast<FEElasticDomain*>(&dom);
         FEBiphasicDomain*  pbd = dynamic_cast<FEBiphasicDomain* >(&dom);
         FEBiphasicSoluteDomain* psd = dynamic_cast<FEBiphasicSoluteDomain*>(&dom);
-        FETriphasicDomain*      ptd = dynamic_cast<FETriphasicDomain*     >(&dom);
         if (psd) {
-            if (fem.GetCurrentStep()->m_nanalysis == FE_STEADY_STATE)
+            if (fem.GetCurrentStep()->m_nanalysis == FEBiphasicSoluteAnalysis::STEADY_STATE)
                 psd->InternalForcesSS(RHS);
             else
                 psd->InternalForces(RHS);
         }
-        else if (ptd) {
-            if (fem.GetCurrentStep()->m_nanalysis == FE_STEADY_STATE)
-                ptd->InternalForcesSS(RHS);
-            else
-                ptd->InternalForces(RHS);
-        }
         else if (pbd) {
-            if (fem.GetCurrentStep()->m_nanalysis == FE_STEADY_STATE)
+            if (fem.GetCurrentStep()->m_nanalysis == FEBiphasicSoluteAnalysis::STEADY_STATE)
                 pbd->InternalForcesSS(RHS);
             else
                 pbd->InternalForces(RHS);
@@ -460,14 +432,6 @@ bool FEBiphasicSoluteSolver::Residual(vector<double>& R)
             ped->InternalForces(RHS);
     }
     
-	// calculate forces due to surface loads
-	int nsl = fem.SurfaceLoads();
-	for (i=0; i<nsl; ++i)
-	{
-		FESurfaceLoad* psl = fem.SurfaceLoad(i);
-		if (psl->IsActive()) psl->LoadVector(RHS, tp);
-	}
-
 	// calculate contact forces
 	if (fem.SurfacePairConstraints() > 0)
 	{
@@ -486,7 +450,7 @@ bool FEBiphasicSoluteSolver::Residual(vector<double>& R)
 		FEModelLoad& mli = *fem.ModelLoad(i);
 		if (mli.IsActive())
 		{
-			mli.LoadVector(RHS, tp);
+			mli.LoadVector(RHS);
 		}
 	}
 
@@ -523,22 +487,20 @@ bool FEBiphasicSoluteSolver::StiffnessMatrix()
 	FEMesh& mesh = fem.GetMesh();
 
 	// setup the linear system
-	FESolidLinearSystem LS(this, &m_rigidSolver, *m_pK, m_Fd, m_ui, (m_msymm == REAL_SYMMETRIC), m_alpha, m_nreq);
+	FESolidLinearSystem LS(&fem, &m_rigidSolver, *m_pK, m_Fd, m_ui, (m_msymm == REAL_SYMMETRIC), m_alpha, m_nreq);
 
 	// calculate the stiffness matrix for each domain
 	FEAnalysis* pstep = fem.GetCurrentStep();
 	bool bsymm = (m_msymm == REAL_SYMMETRIC);
-	if (pstep->m_nanalysis == FE_STEADY_STATE)
+	if (pstep->m_nanalysis == FEBiphasicSoluteAnalysis::STEADY_STATE)
 	{
 		for (int i=0; i<mesh.Domains(); ++i) 
 		{
             // Biphasic-solute analyses may also include biphasic and elastic domains
-			FETriphasicDomain*      ptdom = dynamic_cast<FETriphasicDomain*>(&mesh.Domain(i));
 			FEBiphasicSoluteDomain* psdom = dynamic_cast<FEBiphasicSoluteDomain*>(&mesh.Domain(i));
 			FEBiphasicDomain*  pbdom = dynamic_cast<FEBiphasicDomain*>(&mesh.Domain(i));
 			FEElasticDomain*   pedom = dynamic_cast<FEElasticDomain*>(&mesh.Domain(i));
 			if (psdom) psdom->StiffnessMatrixSS(LS, bsymm);
-			else if (ptdom) ptdom->StiffnessMatrixSS(LS, bsymm);
 			else if (pbdom) pbdom->StiffnessMatrixSS(LS, bsymm);
             else if (pedom) pedom->StiffnessMatrix(LS);
 		}
@@ -548,12 +510,10 @@ bool FEBiphasicSoluteSolver::StiffnessMatrix()
 		for (int i = 0; i<mesh.Domains(); ++i)
 		{
             // Biphasic-solute analyses may also include biphasic and elastic domains
-			FETriphasicDomain*      ptdom = dynamic_cast<FETriphasicDomain*>(&mesh.Domain(i));
 			FEBiphasicSoluteDomain* psdom = dynamic_cast<FEBiphasicSoluteDomain*>(&mesh.Domain(i));
 			FEBiphasicDomain* pbdom = dynamic_cast<FEBiphasicDomain*>(&mesh.Domain(i));
 			FEElasticDomain* pedom = dynamic_cast<FEElasticDomain*>(&mesh.Domain(i));
 			if (psdom) psdom->StiffnessMatrix(LS, bsymm);
-			else if (ptdom) ptdom->StiffnessMatrix(LS, bsymm);
 			else if (pbdom) pbdom->StiffnessMatrix(LS, bsymm);
             else if (pedom) pedom->StiffnessMatrix(LS);
 		}
@@ -566,15 +526,11 @@ bool FEBiphasicSoluteSolver::StiffnessMatrix()
 	}
 
 	// calculate stiffness matrices for surface loads
-	int nsl = fem.SurfaceLoads();
-	for (int i = 0; i<nsl; ++i)
+	int nml = fem.ModelLoads();
+	for (int i = 0; i<nml; ++i)
 	{
-		FESurfaceLoad* psl = fem.SurfaceLoad(i);
-
-		if (psl->IsActive())
-		{
-			psl->StiffnessMatrix(LS, tp);
-		}
+		FEModelLoad* pml = fem.ModelLoad(i);
+		if (pml->IsActive()) pml->StiffnessMatrix(LS);
 	}
 
 	// calculate nonlinear constraint stiffness

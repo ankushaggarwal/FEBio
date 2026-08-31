@@ -35,7 +35,7 @@ class FENodeSet;
 class FEFacetSet;
 
 //-----------------------------------------------------------------------------
-class FECORE_API FEDataMathGenerator : public FEDataGenerator
+class FECORE_API FEDataMathGenerator : public FENodeDataGenerator
 {
 public:
 	FEDataMathGenerator(FEModel* fem);
@@ -45,9 +45,7 @@ public:
 	// set the math expression
 	void setExpression(const std::string& math);
 
-private:
-	void value(const vec3d& r, double& data) override;
-	void value(const vec3d& r, vec3d& data) override;
+	FEDataMap* Generate() override;
 
 private:
 	std::string			m_math;

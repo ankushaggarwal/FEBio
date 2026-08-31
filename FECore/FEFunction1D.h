@@ -44,7 +44,8 @@ class DumpStream;
 //
 class FECORE_API FEFunction1D : public FECoreBase
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FEFUNCTION1D_ID)
+	FECORE_BASE_CLASS(FEFunction1D);
 
 public:
 	FEFunction1D(FEModel* pfem);
@@ -75,6 +76,56 @@ public:
     
     // invert function
     virtual bool invert(const double f0, double &x);
+};
+
+//-----------------------------------------------------------------------------
+// A constant function
+class FECORE_API FEConstFunction : public FEFunction1D
+{
+public:
+	FEConstFunction(FEModel* fem) : FEFunction1D(fem), m_value(0.0) {}
+	FEFunction1D* copy() override { return new FEConstFunction(GetFEModel(), m_value); }
+
+	double value(double t) const override { return m_value;	}
+	double derive(double t) const override { return 0.0; }
+	double deriv2(double t) const override { return 0.0; }
+
+protected:
+	FEConstFunction(FEModel* fem, double val) : FEFunction1D(fem), m_value(val) {}
+
+private:
+	double	m_value;
+
+	DECLARE_FECORE_CLASS();
+};
+
+// A scale function
+class FECORE_API FEScaleFunction : public FEFunction1D
+{
+public:
+	FEScaleFunction(FEModel* fem) : FEFunction1D(fem), m_scale(1.0) {}
+	FEScaleFunction(FEModel* fem, double s) : FEFunction1D(fem), m_scale(s) {}
+	FEFunction1D* copy() override { return new FEScaleFunction(GetFEModel(), m_scale); }
+
+	double value(double t) const override
+	{
+		return m_scale * t;
+	}
+
+	double derive(double t) const override
+	{
+		return m_scale;
+	}
+
+	double deriv2(double t) const override
+	{
+		return 0;
+	}
+
+private:
+	double	m_scale;
+
+	DECLARE_FECORE_CLASS();
 };
 
 //-----------------------------------------------------------------------------

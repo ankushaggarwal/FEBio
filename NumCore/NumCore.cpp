@@ -25,9 +25,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #include "stdafx.h"
 #include "NumCore.h"
-#include "SkylineSolver.h"
-#include "LUSolver.h"
 #include "PardisoSolver.h"
+#include "PardisoSolver64.h"
+#include "PardisoProjectSolver.h"
 #include "RCICGSolver.h"
 #include "FGMRESSolver.h"
 #include "ILU0_Preconditioner.h"
@@ -47,16 +47,22 @@ SOFTWARE.*/
 #include "FEASTEigenSolver.h"
 #include "TestSolver.h"
 #include "AccelerateSparseSolver.h"
+#include "SuperLU_MT.h"
 #include "MKLDSSolver.h"
+#include "numcore_api.h"
 
 //=============================================================================
 // Call this to initialize the NumCore module
-void NumCore::InitModule()
+NUMCORE_API void NumCore::InitModule()
 {
 	// register linear solvers
+#ifdef PARDISO
 	REGISTER_FECORE_CLASS(PardisoSolver  , "pardiso");
-	REGISTER_FECORE_CLASS(SkylineSolver  , "skyline");
-	REGISTER_FECORE_CLASS(LUSolver       , "LU"     );
+	REGISTER_FECORE_CLASS(PardisoSolver64, "pardiso_64");
+	REGISTER_FECORE_CLASS(MKLDSSolver, "mkl_dss");
+#endif
+
+    REGISTER_FECORE_CLASS(PardisoProjectSolver, "pardiso-project");
 	REGISTER_FECORE_CLASS(FGMRESSolver        , "fgmres"   );
 	REGISTER_FECORE_CLASS(BoomerAMGSolver     , "boomeramg");
 	REGISTER_FECORE_CLASS(RCICGSolver         , "cg"    );
@@ -69,7 +75,7 @@ void NumCore::InitModule()
 	REGISTER_FECORE_CLASS(StrategySolver      , "strategy");
 	REGISTER_FECORE_CLASS(TestSolver          , "test");
     REGISTER_FECORE_CLASS(AccelerateSparseSolver, "accelerate");
-    REGISTER_FECORE_CLASS(MKLDSSolver, "mkl_dss");
+    REGISTER_FECORE_CLASS(SuperLU_MT_Solver     , "superlu_mt");
 
 	// register preconditioners
 	REGISTER_FECORE_CLASS(ILU0_Preconditioner, "ilu0");
@@ -77,7 +83,7 @@ void NumCore::InitModule()
 	REGISTER_FECORE_CLASS(IncompleteCholesky , "ichol");
 
 	// register eigen solvers
-	REGISTER_FECORE_CLASS(FEASTEigenSolver, "feast");
+	REGISTER_FECORE_CLASS(FEASTEigenSolver, "feast", FECORE_EXPERIMENTAL);
 
 	// set default linear solver
 	// (Set this before the configuration is read in because

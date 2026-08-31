@@ -29,8 +29,6 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEPlotData.h"
 
-REGISTER_SUPER_CLASS(FEPlotData, FEPLOTDATA_ID);
-
 //-----------------------------------------------------------------------------
 FEPlotData::FEPlotData(FEModel* fem) : FECoreBase(fem)
 {
@@ -40,6 +38,7 @@ FEPlotData::FEPlotData(FEModel* fem) : FECoreBase(fem)
 
 	m_arraySize = 0;
 	m_szdom[0] = 0;
+	m_szunit = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -51,6 +50,8 @@ FEPlotData::FEPlotData(FEModel* fem, Region_Type R, Var_Type t, Storage_Fmt s) :
 
 	m_arraySize = 0;
 	m_szdom[0] = 0;
+
+	m_szunit = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -88,4 +89,51 @@ int FEPlotData::VarSize(Var_Type t)
 void FEPlotData::SetDomainName(const char* szdom)
 {
 	strcpy(m_szdom, szdom); 
+}
+
+FEPlotFieldDescriptor::FEPlotFieldDescriptor(const std::string& typeString)
+{
+	m_valid = false;
+	m_filterType = NO_FILTER;
+	numFilter = -1;
+	fieldName = typeString;
+
+	// see if there is an alias defined
+	size_t equalSign = fieldName.find('=');
+	if (equalSign != string::npos)
+	{
+		alias = fieldName.substr(equalSign + 1, string::npos);
+		fieldName.erase(equalSign, string::npos);
+	}
+	else alias = fieldName;
+
+	// see if there is a filter
+	size_t leftBracket = fieldName.find('[');
+	if (leftBracket != string::npos)
+	{
+		// find the right bracket
+		size_t rightBracket = fieldName.rfind(']');
+		if (rightBracket == string::npos) return;
+
+		string filter = fieldName.substr(leftBracket + 1, rightBracket - leftBracket - 1);
+		fieldName.erase(leftBracket, string::npos);
+
+		// see if the filter is a number or a string
+		size_t leftQuote = filter.find('\'');
+		if (leftQuote != string::npos)
+		{
+			size_t rightQuote = filter.rfind('\'');
+			if ((rightQuote == string::npos) || (rightQuote == leftQuote)) return;
+
+			m_filterType = STRING_FILTER;
+			strFilter = filter.substr(leftQuote + 1, rightQuote - leftQuote - 1);
+		}
+		else
+		{
+			m_filterType = NUMBER_FILTER;
+			numFilter = atoi(filter.c_str());
+		}
+	}
+
+	m_valid = true;
 }

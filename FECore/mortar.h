@@ -30,7 +30,6 @@ SOFTWARE.*/
 #include "vec3d.h"
 #include "FESurface.h"
 #include <vector>
-using namespace std;
 
 //-----------------------------------------------------------------------------
 // Structure for representing 2D points
@@ -42,6 +41,8 @@ struct POINT2D
 //-----------------------------------------------------------------------------
 // Calculates the intersection between two convex polygons
 FECORE_API int ConvexIntersect(POINT2D* P, int n, POINT2D* Q, int m, POINT2D* R);
+
+FECORE_API int ConvexIntersectSH(POINT2D* P, int n, POINT2D* Q, int m, POINT2D* R);
 
 //-----------------------------------------------------------------------------
 class FECORE_API Patch
@@ -106,7 +107,7 @@ private:
 	int		m_primary_facet_id;		//!< index of primary facet
 	int		m_secondary_facet_id;	//!< index of secondary facet
 
-	vector<FACET>	m_tri;	//!< triangular patches
+	std::vector<FACET>	m_tri;	//!< triangular patches
 };
 
 //-----------------------------------------------------------------------------
@@ -124,7 +125,7 @@ public:
 	void Clear() { m_patch.clear(); }
 
 private:
-	vector<Patch>	m_patch;	
+	std::vector<Patch>	m_patch;
 };
 
 //-----------------------------------------------------------------------------

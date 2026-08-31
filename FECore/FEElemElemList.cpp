@@ -36,11 +36,25 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 FEElemElemList::FEElemElemList(void)
 {
+	m_pmesh = nullptr;
 }
 
 //-----------------------------------------------------------------------------
 FEElemElemList::~FEElemElemList(void)
 {
+}
+
+bool FEElemElemList::IsValid() const
+{
+	return (m_pmesh != nullptr);
+}
+
+void FEElemElemList::Clear()
+{
+	m_pmesh = nullptr;
+	m_ref.clear();
+	m_pel.clear();
+	m_peli.clear();
 }
 
 //-----------------------------------------------------------------------------
@@ -53,16 +67,15 @@ void FEElemElemList::Init()
 	m_ref.resize(NE);
 
 	// count nr of neighbors
-	int NN = 0, n = 0, nf;
-	m_ref[0] = 0;
+	int NN = 0, n = 0;
 	for (int i=0; i<m.Domains(); ++i)
 	{
 		FEDomain& dom = m.Domain(i);
 		for (int j=0; j<dom.Elements(); ++j, ++n)
 		{
 			FEElement& el = dom.ElementRef(j);
-			nf = el.Faces();
-			if (n != 0) m_ref[n] = m_ref[n-1] + nf;
+			int nf = el.Faces();
+			m_ref[n] = NN;
 			NN += nf;
 		}
 	}
@@ -84,8 +97,7 @@ bool FEElemElemList::Create(FEMesh* pmesh)
 	Init();
 
 	// create the node element list
-	FENodeElemList NEL;
-	NEL.Create(m);
+	FENodeElemList& NEL = pmesh->NodeElementList();
 
 	// loop over all solid elements first
 	int en0[FEElement::MAX_NODES], en1[FEElement::MAX_NODES], n0, n1, M = 0;

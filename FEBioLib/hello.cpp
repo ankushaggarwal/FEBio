@@ -36,7 +36,7 @@ int febio::Hello(LogStream& log)
 {
 	char szversion[128] = { 0 };
 	char* szvernum = getVersionString();
-	sprintf(szversion, "  version %s\n", szvernum);
+	snprintf(szversion, sizeof(szversion), "  version %s\n", szvernum);
 	
 	log.print("===========================================================================\n");
 	log.print("         ________    _________   _______       __     _________            \n");
@@ -55,7 +55,7 @@ int febio::Hello(LogStream& log)
 	log.print("                                                                           \n");
 	log.print(szversion);
 	log.print("  FEBio is a registered trademark.                                         \n");
-	log.print("  copyright (c) 2006-2021 - All rights reserved                            \n");
+	log.print("  copyright (c) 2006-2026 - All rights reserved                            \n");
 	log.print("                                                                           \n");
 	log.print("===========================================================================\n");
 	log.print("\n");

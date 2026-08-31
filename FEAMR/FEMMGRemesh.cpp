@@ -25,9 +25,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #include "stdafx.h"
 #include "FEMMGRemesh.h"
-#include <FECore/FEModel.h>
 #include <FECore/FEMeshTopo.h>
-#include <FECore/FEMesh.h>
+#include <FECore/FEModel.h>
 #include <FECore/FEDomain.h>
 #include <FECore/FESolidDomain.h>
 #include <FECore/FESurface.h>
@@ -40,6 +39,7 @@ SOFTWARE.*/
 #include "FEMeshShapeInterpolator.h"
 #include "FEDomainShapeInterpolator.h"
 #include <FECore/FECoreKernel.h>
+#include <FECore/FEMaterial.h>
 #ifdef HAS_MMG
 #include "mmg/mmg3d/libmmg3d.h"
 
@@ -94,8 +94,7 @@ FEMMGRemesh::FEMMGRemesh(FEModel* fem) : FERefineMesh(fem)
 
 bool FEMMGRemesh::Init()
 {
-	FEModel& fem = *GetFEModel();
-	FEMesh& mesh = fem.GetMesh();
+	FEMesh& mesh = GetMesh();
 	if (mesh.IsType(ET_TET4) == false) return false;
 
 	return FERefineMesh::Init();
@@ -104,8 +103,7 @@ bool FEMMGRemesh::Init()
 bool FEMMGRemesh::RefineMesh()
 {
 #ifdef HAS_MMG
-	FEModel& fem = *GetFEModel();
-	FEMesh& mesh = fem.GetMesh();
+	FEMesh& mesh = GetMesh();
 
 	// initialize the MMG mesh
 	MMG5_pMesh mmgMesh = NULL;
@@ -136,7 +134,7 @@ bool FEMMGRemesh::RefineMesh()
 	}
 
 	// build the new mesh
-	bool bret = mmg->build_new_mesh(mmgMesh, mmgSol, fem);
+	bool bret = mmg->build_new_mesh(mmgMesh, mmgSol, *GetFEModel());
 
 	// Clean up
 	MMG3D_Free_all(MMG5_ARG_start,
@@ -154,10 +152,17 @@ bool FEMMGRemesh::RefineMesh()
 
 bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMeshTopo& topo)
 {
+	FEMeshAdaptorCriterion* criterion = m_mmgRemesh->GetCriterion();
+	assert(criterion);
+	if (criterion == nullptr) return false;
+	FEElementSet* elset = m_mmgRemesh->GetElementSet();
+	FEMeshAdaptorSelection elemList = criterion->GetElementSelection(elset);
+	if (elemList.size() == 0) return false;
+
 	FEMesh& mesh = *topo.GetMesh();
 	int NN = mesh.Nodes();
 	int NE = topo.Elements();
-	int NF = topo.SurfaceFaces();
+	int NF = topo.Faces();
 
 	// allocate mesh size
 	if (MMG3D_Set_meshSize(mmgMesh, NN, NE, 0, NF, 0, 0) != 1)
@@ -195,7 +200,7 @@ bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMe
 	for (int i = 0; i < mesh.Surfaces(); ++i)
 	{
 		FESurface& surf = mesh.Surface(i);
-		vector<int> faceIndexList = topo.SurfaceFaceIndexList(surf);
+		vector<int> faceIndexList = topo.FaceIndexList(surf);
 		for (int j = 0; j < faceIndexList.size(); ++j)
 		{
 			faceMarker[faceIndexList[j]] = faceMark;
@@ -216,7 +221,7 @@ bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMe
 			// see if this is indeed a surface node set
 			for (int j = 0; j < NF; ++j)
 			{
-				const FEFaceList::FACE& face = topo.SurfaceFace(j);
+				const FEFaceList::FACE& face = topo.Face(j);
 				const int* fn = face.node;
 				if ((nodeTags[fn[0]] != 0) && (nodeTags[fn[1]] != 0) && (nodeTags[fn[2]] != 0))
 				{
@@ -232,7 +237,7 @@ bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMe
 			{
 				for (int j = 0; j < NF; ++j)
 				{
-					const FEFaceList::FACE& face = topo.SurfaceFace(j);
+					const FEFaceList::FACE& face = topo.Face(j);
 					const int* fn = face.node;
 					if ((nodeTags[fn[0]] == 1) && (nodeTags[fn[1]] == 1) && (nodeTags[fn[2]] == 1))
 					{
@@ -262,7 +267,7 @@ bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMe
 	// create the faces
 	for (int i = 0; i < NF; ++i)
 	{
-		const FEFaceList::FACE& f = topo.SurfaceFace(i);
+		const FEFaceList::FACE& f = topo.Face(i);
 		const int* n = &f.node[0];
 		MMG3D_Set_triangle(mmgMesh, n[0] + 1, n[1] + 1, n[2] + 1, faceMarker[i], i + 1);
 	}
@@ -314,7 +319,6 @@ bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMe
 		}
 	}
 
-	FEElementSet* elset = m_mmgRemesh->GetElementSet();
 	if (elset)
 	{
 		// elements that are not in the element set will be flagged as required.
@@ -332,11 +336,6 @@ bool FEMMGRemesh::MMG::build_mmg_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMe
 
 	// scale factors
 	vector<double> nodeScale(NN, 0.0);
-	FEMeshAdaptorCriterion* criterion = m_mmgRemesh->GetCriterion();
-
-	assert(criterion);
-	if (criterion == nullptr) return false;
-	FEMeshAdaptorSelection elemList = criterion->GetElementSelection(elset);
 
 	// see if want to normalize the data
 	if (m_mmgRemesh->m_normalizeData)
@@ -469,6 +468,7 @@ bool FEMMGRemesh::MMG::build_new_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMo
 		{
 			assert(false);
 			delete mapper;
+			throw std::runtime_error("Fatal error in MMG remesh during nodal mapping.");
 			return false;
 		}
 
@@ -535,6 +535,8 @@ bool FEMMGRemesh::MMG::build_new_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMo
 		}
 
 		// re-init domain
+		FEMaterial* mat = dom.GetMaterial();
+		dom.SetMatID(mat->GetID() - 1);
 		dom.CreateMaterialPointData();
 		dom.Reset();	// NOTE: we need to call this to actually call the Init function on the material points.
 		dom.Init();
@@ -635,12 +637,9 @@ bool FEMMGRemesh::MMG::build_new_mesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, FEMo
 		else
 		{
 			// assume this node set is determined by the entire mesh
-			FESolidDomain& dom = dynamic_cast<FESolidDomain&>(mesh.Domain(0));
-//			if (nset.Size() == dom.Nodes())
-			{
-				nset.Clear();
-				for (int i = 0; i < dom.Nodes(); ++i) nset.Add(dom.NodeIndex(i));
-			}
+			nset.Clear();
+			int N = mesh.Nodes();
+			for (int i = 0; i < N; ++i) nset.Add(i);
 		}
 	}
 

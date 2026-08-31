@@ -148,18 +148,27 @@ double FEMathExpression::value(FEModel* fem, const FEMaterialPoint& pt)
 }
 
 //=============================================================================
-REGISTER_SUPER_CLASS(FEScalarValuator, FESCALARGENERATOR_ID);
-
-//=============================================================================
 BEGIN_FECORE_CLASS(FEConstValue, FEScalarValuator)
 	ADD_PARAMETER(m_val, "const");
 END_FECORE_CLASS();
+
+FEScalarValuator* FEConstValue::copy()
+{
+	FEConstValue* val = fecore_alloc(FEConstValue, GetFEModel());
+	val->m_val = m_val;
+	return val;
+}
 
 //=============================================================================
 
 BEGIN_FECORE_CLASS(FEMathValue, FEScalarValuator)
 	ADD_PARAMETER(m_expr, "math");
 END_FECORE_CLASS();
+
+FEMathValue::FEMathValue(FEModel* fem) : FEScalarValuator(fem)
+{
+	m_parent = nullptr;
+}
 
 void FEMathValue::setMathString(const std::string& s)
 {
@@ -175,7 +184,16 @@ void FEMathValue::Serialize(DumpStream& ar)
 {
 	FEScalarValuator::Serialize(ar);
 	if (ar.IsShallow()) return;
-	if (ar.IsLoading()) create();
+
+	if (ar.IsSaving())
+	{
+		ar << m_parent;
+	}
+	else if (ar.IsLoading())
+	{
+		ar >> m_parent;
+		create(m_parent);
+	}
 }
 
 bool FEMathValue::create(FECoreBase* pc)
@@ -197,6 +215,7 @@ bool FEMathValue::create(FECoreBase* pc)
 		// Now try to find the owner of this parameter
 		pc = fem->FindParameterOwner(param);
 	}
+	m_parent = pc;
 
 	// initialize the math expression
 	bool b = m_math.Init(m_expr, pc);
@@ -209,7 +228,7 @@ FEMathValue::~FEMathValue()
 
 FEScalarValuator* FEMathValue::copy()
 {
-	FEMathValue* newExpr = new FEMathValue(GetFEModel());
+	FEMathValue* newExpr = fecore_alloc(FEMathValue, GetFEModel());
 	newExpr->m_expr = m_expr;
 	newExpr->m_math = m_math;
 	return newExpr;
@@ -224,6 +243,7 @@ double FEMathValue::operator()(const FEMaterialPoint& pt)
 
 FEMappedValue::FEMappedValue(FEModel* fem) : FEScalarValuator(fem), m_val(nullptr)
 {
+	m_scale = 1.0;
 }
 
 void FEMappedValue::setDataMap(FEDataMap* val)
@@ -236,21 +256,28 @@ FEDataMap* FEMappedValue::dataMap()
 	return m_val;
 }
 
+void FEMappedValue::setScaleFactor(double s)
+{
+	m_scale = s;
+}
+
 double FEMappedValue::operator()(const FEMaterialPoint& pt)
 {
-	return m_val->value(pt);
+	return m_scale*m_val->value(pt);
 }
 
 FEScalarValuator* FEMappedValue::copy()
 {
 	FEMappedValue* map = fecore_alloc(FEMappedValue, GetFEModel());
 	map->setDataMap(m_val);
+	map->m_scale = m_scale;
 	return map;
 }
 
 void FEMappedValue::Serialize(DumpStream& dmp)
 {
 	if (dmp.IsShallow()) return;
+	dmp & m_scale;
 	dmp & m_val;
 }
 
@@ -273,7 +300,7 @@ double FENodeMappedValue::operator()(const FEMaterialPoint& pt)
 
 FEScalarValuator* FENodeMappedValue::copy()
 {
-	FENodeMappedValue* map = new FENodeMappedValue(GetFEModel());
+	FENodeMappedValue* map = fecore_alloc(FENodeMappedValue, GetFEModel());
 	map->setDataMap(m_val);
 	return map;
 }

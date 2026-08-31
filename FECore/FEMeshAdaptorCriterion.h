@@ -25,7 +25,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #pragma once
 #include "fecore_api.h"
-#include "FECoreBase.h"
+#include "FEModelComponent.h"
 #include <FECore/FEMaterialPoint.h>
 
 class FEElementSet;
@@ -70,9 +70,10 @@ private:
 // This class is a helper class for use in the mesh adaptors. Its purpose is to assign
 // values based on some criterion. This element list is then usually passed to the 
 // mesh adaptor for further processing.
-class FECORE_API FEMeshAdaptorCriterion : public FECoreBase
+class FECORE_API FEMeshAdaptorCriterion : public FEModelComponent
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FEMESHADAPTORCRITERION_ID)
+	FECORE_BASE_CLASS(FEMeshAdaptorCriterion)
 
 public:
 	// Constructor
@@ -82,6 +83,10 @@ public:
 	// The elements will be taken from the element set. If nullptr is passed
 	// for the element set, the entire mesh will be processed
 	virtual FEMeshAdaptorSelection GetElementSelection(FEElementSet* elset);
+
+	// evaluate an element. This can be overriden by derived classes. By default,
+	// it will evaluate the integration point average by calling GetMaterialPointValue
+	virtual bool GetElementValue(FEElement& el, double& value);
 
 	// This function needs to be overridden in order to set the element's value.  
 	// Return false if the element cannot be evaluated. Otherwise return true.

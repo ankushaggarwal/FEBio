@@ -26,7 +26,6 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEMassDamping.h"
 #include <FEBioMech/FEElasticMaterialPoint.h>
-#include <FECore/FEModel.h>
 
 BEGIN_FECORE_CLASS(FEMassDamping, FEBodyForce)
 	ADD_PARAMETER(m_C, "C");
@@ -44,10 +43,16 @@ vec3d FEMassDamping::force(FEMaterialPoint& mp)
 	return ep.m_v*m_C;
 }
 
-//! calculate constribution to stiffness matrix
-mat3ds FEMassDamping::stiffness(FEMaterialPoint& pt)
+//! calculate the divergence of the body force at a material point
+double FEMassDamping::divforce(FEMaterialPoint& mp)
 {
-	FETimeInfo& ti = GetFEModel()->GetTime();
-	double dt = ti.timeIncrement;
+    FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
+    return ep.m_L.trace()*m_C;
+}
+
+//! calculate constribution to stiffness matrix
+mat3d FEMassDamping::stiffness(FEMaterialPoint& pt)
+{
+	double dt = CurrentTimeIncrement();
 	return mat3dd(-m_C / dt);
 }

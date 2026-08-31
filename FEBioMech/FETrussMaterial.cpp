@@ -31,19 +31,63 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FETrussMaterial, FEMaterial)
-	ADD_PARAMETER(m_E, FE_RANGE_GREATER(0.0), "E");
+	ADD_PARAMETER(m_rho, FE_RANGE_GREATER(0.0), "density");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
-// Note that this function returns the Kirchhoff stress!
-double FETrussMaterial::Stress(FEMaterialPoint &mp)
+FETrussMaterial::FETrussMaterial(FEModel* pfem) : FEMaterial(pfem) 
 {
-	FETrussMaterialPoint& pt = *mp.ExtractData<FETrussMaterialPoint>();
-	return m_E*log(pt.m_l);
+	m_rho = 1.0;
+
+	AddDomainParameter(new FETrussStress());
 }
 
 //-----------------------------------------------------------------------------
-double FETrussMaterial::Tangent(FEMaterialPoint &pt)
+FETrussMaterial::~FETrussMaterial() 
 {
-	return m_E;
+}
+
+//-----------------------------------------------------------------------------
+//! material density
+double FETrussMaterial::Density(FEMaterialPoint& mp)
+{
+	return m_rho(mp);
+}
+
+//=============================================================================
+// define the material parameters
+BEGIN_FECORE_CLASS(FELinearTrussMaterial, FETrussMaterial)
+	ADD_PARAMETER(m_E, FE_RANGE_GREATER(0.0), "E")->setUnits(UNIT_PRESSURE);
+	ADD_PARAMETER(m_v, FE_RANGE_CLOSED(-1, 0.5), "v");
+END_FECORE_CLASS();
+
+//-----------------------------------------------------------------------------
+FELinearTrussMaterial::FELinearTrussMaterial(FEModel* fem) : FETrussMaterial(fem)
+{
+	m_E = 0.0;
+	m_v = 0.5;
+}
+
+//-----------------------------------------------------------------------------
+// Note that this function returns the Kirchhoff stress!
+double FELinearTrussMaterial::Stress(FEMaterialPoint &mp)
+{
+	FETrussMaterialPoint& pt = *mp.ExtractData<FETrussMaterialPoint>();
+	double E = m_E(mp);
+	return E*log(pt.m_lam);
+}
+
+//-----------------------------------------------------------------------------
+double FELinearTrussMaterial::Tangent(FEMaterialPoint &mp)
+{
+	double E = m_E(mp);
+	return E;
+}
+
+FETrussStress::FETrussStress() : FEDomainParameter("stress") {}
+
+FEParamValue FETrussStress::value(FEMaterialPoint& mp)
+{
+	FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
+	return pt.m_s;
 }

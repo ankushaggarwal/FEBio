@@ -57,13 +57,13 @@ public:
 	void Clear() { for (size_t i=0; i<m_data.size(); ++i) delete m_data[i]; m_data.clear(); }
 
 	//! create 
-	void Create(int n) { m_data.assign(n, static_cast<FEMaterialPoint*>(0) ); }
+	void Create(int n) { Clear(); m_data.assign(n, static_cast<FEMaterialPoint*>(0)); }
 
 	//! operator for easy access to element data
 	FEMaterialPoint*& operator [] (int n) { return m_data[n]; }
 
 private:
-	vector<FEMaterialPoint*>	m_data;
+	std::vector<FEMaterialPoint*>	m_data;
 };
 
 //-----------------------------------------------------------------------------
@@ -160,6 +160,7 @@ public:
 	{ 
 		pmp->m_elem = this;
 		pmp->m_index = n;
+		if (m_State[n] != nullptr) delete m_State[n];
 		m_State[n] = pmp; 
 	}
 
@@ -173,7 +174,7 @@ public:
 	double Evaluate(int order, double* fn, int n);
 
 	//! evaluate scale field at integration point
-	double Evaluate(vector<double>& fn, int n);
+	double Evaluate(std::vector<double>& fn, int n);
 
 	//! evaluate vector field at integration point
 	vec2d Evaluate(vec2d* vn, int n);
@@ -184,9 +185,6 @@ public:
 	// see if this element has the node n
     bool HasNode(int n) const;
 
-    // see if this element has the list of nodes n
-    int HasNodes(int* n, const int ns) const;
-    
 	// find local element index of node n
     int FindNode(int n) const;
 
@@ -217,11 +215,11 @@ protected:
 	FEMeshPartition * m_part;	//!< parent mesh partition
 
 public:
-	vector<int>		m_node;		//!< connectivity
+	std::vector<int>		m_node;		//!< connectivity
 
 	// This array stores the local node numbers, that is the node numbers
 	// into the node list of a domain.
-	vector<int>		m_lnode;	//!< local connectivity
+	std::vector<int>		m_lnode;	//!< local connectivity
 
 public: 
 	// NOTE: Work in progress
@@ -247,8 +245,16 @@ public:
 
 	FETrussElement& operator = (const FETrussElement& el);
 
+	void Serialize(DumpStream& ar) override;
+
+	double* GaussWeights() const { return &((FETrussElementTraits*)(m_pT))->gw[0]; }
+
 public:
 	double	m_a0;	// cross-sectional area
+	double	m_lam;	// current stretch ratio
+	double	m_tau;	// Kirchoff stress
+	double	m_L0;	// initial length
+	double	m_Lt;	// current length
 };
 
 //-----------------------------------------------------------------------------
@@ -305,4 +311,50 @@ public:
 	FELineElement& operator = (const FELineElement& el);
 
 	void SetTraits(FEElementTraits* pt);
+
+	double* GaussWeights() { return &((FELineElementTraits*)(m_pT))->gw[0]; }			// weights of integration points
+
+	double* Gr(int n) const { return ((FELineElementTraits*)(m_pT))->Gr[n]; }	// shape function derivative to r
+
+	void shape(double* H, double r) { return ((FELineElementTraits*)(m_pT))->shape(H, r); }
+
+	void shape_deriv(double* Hr, double r) { return ((FELineElementTraits*)(m_pT))->shape_deriv(Hr, r); }
+
+	void shape_deriv2(double* Hrr, double r) { return ((FELineElementTraits*)(m_pT))->shape_deriv2(Hrr, r); }
+
+	vec3d eval(vec3d* d, int n)
+	{
+		int ne = Nodes();
+		double* N = H(n);
+		vec3d a(0, 0, 0);
+		for (int i = 0; i < ne; ++i) a += d[i] * N[i];
+		return a;
+	}
+
+	vec3d eval_deriv(vec3d* d, int j)
+	{
+		double* Hr = Gr(j);
+		int n = Nodes();
+		vec3d v(0, 0, 0);
+		for (int i = 0; i < n; ++i) v += d[i] * Hr[i];
+		return v;
+	}
+};
+
+//-----------------------------------------------------------------------------
+class FECORE_API FEBeamElement : public FEElement
+{
+public:
+	FEBeamElement();
+
+	FEBeamElement(const FEBeamElement& el);
+
+	FEBeamElement& operator = (const FEBeamElement& el);
+
+	double* GaussWeights() { return &((FEBeamElementTraits*)(m_pT))->gw[0]; }
+	double* Hr(int n) { return ((FEBeamElementTraits*)(m_pT))->Gr[n]; }
+
+public:
+	double	m_L0;	// initial length of beam
+	mat3d	m_E;	// columns are local beam orientation
 };

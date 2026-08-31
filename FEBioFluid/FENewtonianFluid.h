@@ -28,6 +28,7 @@ SOFTWARE.*/
 
 #pragma once
 #include "FEViscousFluid.h"
+#include <FECore/FEFunction1D.h>
 
 //-----------------------------------------------------------------------------
 // This class evaluates the viscous stress in a Newtonian fluid
@@ -38,6 +39,12 @@ public:
     //! constructor
     FENewtonianFluid(FEModel* pfem);
     
+    //! initialization
+    bool Init() override;
+    
+    //! Serialization
+    void Serialize(DumpStream& ar) override;
+
     //! viscous stress
     mat3ds Stress(FEMaterialPoint& pt) override;
     
@@ -47,19 +54,19 @@ public:
     //! tangent of stress with respect to rate of deformation tensor D
     tens4ds Tangent_RateOfDeformation(FEMaterialPoint& mp) override;
     
-    //! tangent of stress with respect to temperature
-    mat3ds Tangent_Temperature(FEMaterialPoint& mp) override { return mat3ds(0); };
-    
     //! dynamic viscosity
     double ShearViscosity(FEMaterialPoint& mp) override;
-    
+
+	//! derivative of shear viscosity w.r.t. strain rate
+	double Tangent_ShearViscosity_StrainRate(FEMaterialPoint& mp) override;
+
     //! bulk viscosity
     double BulkViscosity(FEMaterialPoint& mp) override;
-    
+
 public:
     double	m_kappa;	//!< bulk viscosity
     double	m_mu;		//!< shear viscosity
-    
+
     // declare parameter list
     DECLARE_FECORE_CLASS();
 };

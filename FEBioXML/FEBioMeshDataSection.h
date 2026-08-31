@@ -51,11 +51,17 @@ public:
 protected:
 	void ParseShellThickness(XMLTag& tag, FEElementSet& set);
 	void ParseMaterialFibers(XMLTag& tag, FEElementSet& set);
-	void ParseMaterialAxes  (XMLTag& tag, FEElementSet& set);
+	void ParseElementMaterialAxes(XMLTag& tag, FEElementSet& set);
+	void ParseMaterialAxesProperty(XMLTag& tag, FEElementSet& set);
 	void ParseMaterialData  (XMLTag& tag, FEElementSet& set, const string& name);
 	void ParseMaterialFiberProperty(XMLTag& tag, FEElementSet& set);
 
 private:
+	void ParseNodeData(XMLTag& tag);
+	void ParseEdgeData(XMLTag& tag);
+	void ParseSurfaceData(XMLTag& tag);
+	void ParseElementData(XMLTag& tag);
+
 	void ParseElementData(XMLTag& tag, FEElementSet& set, vector<ELEMENT_DATA>& values, int nvalues);
 	void ParseElementData(XMLTag& tag, FEDomainMap& map);
 	void ParseDataArray(XMLTag& tag, FEDataArray& map, const char* sztag);
@@ -99,4 +105,33 @@ private:
 	void ParseElementData(XMLTag& tag, FEDomainMap& map);
 	void ParseSurfaceData(XMLTag& tag, FESurfaceMap& map);
 	void ParseNodeData   (XMLTag& tag, FENodeDataMap& map);
+};
+
+//-----------------------------------------------------------------------------
+// MeshData Section for febio_spec 4.0
+class FEBioMeshDataSection4: public FEBioFileSection
+{
+	struct ELEMENT_DATA
+	{
+		int		nval;	// number of values read
+		double	val[FEElement::MAX_NODES];	// scalar value
+	};
+
+public:
+	FEBioMeshDataSection4(FEBioImport* pim) : FEBioFileSection(pim) {}
+	void Parse(XMLTag& tag);
+
+protected:
+	void ParseNodalData(XMLTag& tag);
+	void ParseSurfaceData(XMLTag& tag);
+	void ParseElementData(XMLTag& tag);
+
+private:
+	void ParseNodeData(XMLTag& tag, FENodeDataMap& map);
+	void ParseSurfaceData(XMLTag& tag, FESurfaceMap& map);
+	void ParseElementData(XMLTag& tag, FEElementSet& set, vector<ELEMENT_DATA>& values, int nvalues);
+	void ParseElementData(XMLTag& tag, FEDomainMap& map);
+	void ParseShellThickness(XMLTag& tag, FEElementSet& set);
+	void ParseMaterialAxes(XMLTag& tag, FEElementSet& set);
+	void ParseMaterialFibers(XMLTag& tag, FEElementSet& set);
 };

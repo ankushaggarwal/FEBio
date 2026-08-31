@@ -116,14 +116,13 @@ public:
 	double	m_gamma;		//!< Newmark parameter gamme (velocity integration)
 
 public:
-	vector<double> m_Fn;	//!< concentrated nodal force vector
 	vector<double> m_Fr;	//!< nodal reaction forces
 
 public:
 	bool	m_bnew_update;	//!< use new rigid body update algorithm
 
 protected:
-	FEDofList	m_dofU, m_dofV, m_dofSQ, m_dofRQ;
+	FEDofList	m_dofU, m_dofV, m_dofSU, m_dofRQ;
 
 protected:
 	FERigidSolverOld	m_rigidSolver;

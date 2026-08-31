@@ -26,12 +26,12 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEAzimuthConstraint.h"
 #include "FEBioMech.h"
-#include <FECore/FEModel.h>
 #include <FECore/FELinearSystem.h>
+#include <FECore/FENode.h>
 #include <FECore/log.h>
 
 BEGIN_FECORE_CLASS(FEAzimuthConstraint, FENodeSetConstraint)
-	ADD_PARAMETER(m_laugon, "laugon");
+	ADD_PARAMETER(m_laugon, "laugon")->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0LAGMULT\0");
 	ADD_PARAMETER(m_tol, "augtol");
 	ADD_PARAMETER(m_eps, "penalty");
 	ADD_PARAMETER(m_minaug, "minaug");
@@ -40,14 +40,18 @@ BEGIN_FECORE_CLASS(FEAzimuthConstraint, FENodeSetConstraint)
 
 FEAzimuthConstraint::FEAzimuthConstraint(FEModel* fem) : FENodeSetConstraint(fem), m_dofU(fem), m_nodeSet(fem)
 {
-	m_laugon = 0;
+	m_laugon = FECore::PENALTY_METHOD;
 	m_tol = 0.1;
 	m_eps = 0.0;
 
 	m_minaug = 0;
 	m_maxaug = 0;
 
-	m_dofU.AddVariable(FEBioMech::GetVariableName(FEBioMech::DISPLACEMENT));
+	// TODO: Can this be done in Init, since there is no error checking
+	if (fem)
+	{
+		m_dofU.AddVariable(FEBioMech::GetVariableName(FEBioMech::DISPLACEMENT));
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -65,7 +69,7 @@ bool FEAzimuthConstraint::Init()
 void FEAzimuthConstraint::Serialize(DumpStream& ar)
 {
 	FENLConstraint::Serialize(ar);
-	ar & m_Lm;
+	ar & m_Lm & m_Lp;
 }
 
 //-----------------------------------------------------------------------------
@@ -86,7 +90,7 @@ void FEAzimuthConstraint::BuildMatrixProfile(FEGlobalMatrix& M)
 		lm[0] = n0.m_ID[m_dofU[0]];
 		lm[1] = n0.m_ID[m_dofU[1]];
 
-		if (m_laugon == 2)
+		if (m_laugon == FECore::LAGMULT_METHOD)
 		{
 			lm.push_back(m_eq[2*i  ]);
 			lm.push_back(m_eq[2*i+1]);
@@ -102,9 +106,10 @@ int FEAzimuthConstraint::InitEquations(int neq)
 {
 	int N = m_nodeSet.Size();
 	m_Lm.assign(N, vec3d(0, 0, 0));
+	m_Lp = m_Lm;
 
 	// make sure we want to use Lagrange Multiplier method
-	if (m_laugon != 2) return 0;
+	if (m_laugon != FECore::LAGMULT_METHOD) return 0;
 
 	// allocate two equations per node
 	m_eq.resize(2 * N);
@@ -137,7 +142,7 @@ void FEAzimuthConstraint::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 		// calculate force
 		vector<double> F;
 		vector<int> lm;
-		if (m_laugon == 2)
+		if (m_laugon == FECore::LAGMULT_METHOD)
 		{
 			// Lagrange multiplier formulation
 			vec3d Pl = P * m_Lm[i];
@@ -175,8 +180,6 @@ void FEAzimuthConstraint::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 //! calculate the constraint stiffness
 void FEAzimuthConstraint::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-
 	int N = m_nodeSet.Size();
 	for (int i = 0; i < N; ++i)
 	{
@@ -196,7 +199,7 @@ void FEAzimuthConstraint::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& 
 		mat3ds Q = (Ploe + P * (et*m_Lm[i])) / (-l);
 
 		// stiffness
-		if (m_laugon == 2)
+		if (m_laugon == FECore::LAGMULT_METHOD)
 		{
 			FEElementMatrix ke(4, 4); ke.zero();
 			ke[0][0] = Q(0, 0); ke[0][1] = Q(0, 1);
@@ -244,18 +247,37 @@ void FEAzimuthConstraint::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& 
 	}
 }
 
-void FEAzimuthConstraint::Update(const std::vector<double>& ui)
+void FEAzimuthConstraint::PrepStep()
 {
-	if (m_laugon == 2)
+	m_Lp = m_Lm;
+}
+
+void FEAzimuthConstraint::Update(const std::vector<double>& Ui, const std::vector<double>& ui)
+{
+	if (m_laugon == FECore::LAGMULT_METHOD)
 	{
 		int N = m_nodeSet.Size();
 		for (int i = 0; i < N; ++i)
 		{
-			m_Lm[i].x += ui[m_eq[2*i  ]];
-			m_Lm[i].y += ui[m_eq[2*i+1]];
+			m_Lm[i].x = m_Lp[i].x + Ui[m_eq[2*i  ]] + ui[m_eq[2*i  ]];
+			m_Lm[i].y = m_Lp[i].y + Ui[m_eq[2*i+1]] + ui[m_eq[2*i+1]];
 		}
 	}
 }
+
+void FEAzimuthConstraint::UpdateIncrements(std::vector<double>& Ui, const std::vector<double>& ui)
+{
+	if (m_laugon == FECore::LAGMULT_METHOD)
+	{
+		int N = m_nodeSet.Size();
+		for (int i = 0; i < N; ++i)
+		{
+			Ui[m_eq[2*i  ]] += ui[m_eq[2*i  ]];
+			Ui[m_eq[2*i+1]] += ui[m_eq[2*i+1]];
+		}
+	}
+}
+
 
 //! augmentations
 bool FEAzimuthConstraint::Augment(int naug, const FETimeInfo& tp)
@@ -282,12 +304,12 @@ bool FEAzimuthConstraint::Augment(int naug, const FETimeInfo& tp)
 		double L0 = m_Lm[i].norm();
 		double L1 = lam1.norm();
 
-		if (m_laugon == 0)
+		if (m_laugon == FECore::PENALTY_METHOD)
 		{
 			// penalty-formulation
 			feLog("\t%d: %lg, %lg\n", nodeId, g, L1);
 		}
-		else if (m_laugon == 2)
+		else if (m_laugon == FECore::LAGMULT_METHOD)
 		{
 			// Lagrange multiplier
 			feLog("\t%d: %lg, %lg\n", nodeId, g, L0);

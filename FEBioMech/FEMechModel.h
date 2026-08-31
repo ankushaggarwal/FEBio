@@ -30,10 +30,8 @@ SOFTWARE.*/
 //---------------------------------------------------------------------------------------
 class FERigidSystem;
 class FERigidBody;
-class FERigidBodyDisplacement;
-class FERigidBodyFixedBC;
+class FERigidBC;
 class FERigidIC;
-class FERigidSurface;
 class FERigidNodeSet;
 
 //---------------------------------------------------------------------------------------
@@ -46,6 +44,9 @@ public:
 	// clear all model data
 	void Clear() override;
 
+	// model initialization
+	bool Init() override;
+
 	// model activation
 	void Activate() override;
 
@@ -55,8 +56,11 @@ public:
 	// reset
 	bool Reset() override;
 
+	// initialize mesh
+	bool InitMesh() override;
+
 	//! Initialize shells
-	void InitShells() override;
+	bool InitShells() override;
 
 	// find a parameter value
 	FEParamValue GetParameterValue(const ParamString& param) override;
@@ -75,7 +79,7 @@ public:
 	FERigidSystem* GetRigidSystem();
 
 	// initialize the rigid system
-	bool InitRigidSystem() override;
+	bool InitRigidSystem();
 
 	// number of rigid bodies
 	int RigidBodies() const;
@@ -83,29 +87,20 @@ public:
 	// get a rigid body
 	FERigidBody* GetRigidBody(int n);
 
-	// find a rigid surface
-	FERigidSurface* FindRigidSurface(const std::string& name);
-
 	// find a rigid body from a material ID
 	int FindRigidbodyFromMaterialID(int matId);
 
-	// return number or rigid prescribed BCs
-	int RigidPrescribedBCs() const;
+	// return number or rigid BCs
+	int RigidBCs() const;
 
 	// return the rigid prescribed displacement
-	FERigidBodyDisplacement* GetRigidPrescribedBC(int i);
+	FERigidBC* GetRigidBC(int i);
 
-	// add a rigid presribed BC
-	void AddRigidPrescribedBC(FERigidBodyDisplacement* pDC);
-
-	// add a rigid fixed BC
-	void AddRigidFixedBC(FERigidBodyFixedBC* pBC);
+	// add a rigid BC
+	void AddRigidBC(FERigidBC* pDC);
 
 	// add a rigid initial condition
 	void AddRigidInitialCondition(FERigidIC* pIC);
-
-	// add a rigid nodeset
-	void AddRigidNodeSet(FERigidNodeSet* rns);
 
 private:
 	FERigidSystem*	m_prs;

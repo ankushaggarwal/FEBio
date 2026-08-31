@@ -41,18 +41,23 @@ END_FECORE_CLASS()
 //! constructor
 FEBiphasicFSITraction::FEBiphasicFSITraction(FEModel* pfem) : FESurfaceLoad(pfem), m_dofU(pfem), m_dofSU(pfem), m_dofW(pfem)
 {
-    // get the degrees of freedom
-    m_dofU.AddVariable(FEBioFSI::GetVariableName(FEBioFSI::DISPLACEMENT));
-    m_dofSU.AddVariable(FEBioFSI::GetVariableName(FEBioFSI::SHELL_DISPLACEMENT));
-    m_dofW.AddVariable(FEBioFSI::GetVariableName(FEBioFSI::RELATIVE_FLUID_VELOCITY));
-    m_dofEF = pfem->GetDOFIndex(FEBioFSI::GetVariableName(FEBioFSI::FLUID_DILATATION), 0);
     m_bshellb = false;
-    
-    m_dof.Clear();
-    m_dof.AddDofs(m_dofU);
-    m_dof.AddDofs(m_dofSU);
-    m_dof.AddDofs(m_dofW);
-    m_dof.AddDof(m_dofEF);
+
+    // get the degrees of freedom
+    // TODO: Can this be done in Init, since  there is no error checking
+    if (pfem)
+    {
+        m_dofU.AddVariable(FEBioFSI::GetVariableName(FEBioFSI::DISPLACEMENT));
+        m_dofSU.AddVariable(FEBioFSI::GetVariableName(FEBioFSI::SHELL_DISPLACEMENT));
+        m_dofW.AddVariable(FEBioFSI::GetVariableName(FEBioFSI::RELATIVE_FLUID_VELOCITY));
+        m_dofEF = pfem->GetDOFIndex(FEBioFSI::GetVariableName(FEBioFSI::FLUID_DILATATION), 0);
+
+        m_dof.Clear();
+        m_dof.AddDofs(m_dofU);
+        m_dof.AddDofs(m_dofSU);
+        m_dof.AddDofs(m_dofW);
+        m_dof.AddDof(m_dofEF);
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -74,8 +79,8 @@ bool FEBiphasicFSITraction::Init()
         bool bself = false;
         FESurfaceElement& el = surf.Element(j);
         // extract the first of two elements on this interface
-        m_elem[j] = el.m_elem[0];
-        if (el.m_elem[1] == nullptr) bself = true;
+        m_elem[j] = el.m_elem[0].pe;
+        if (el.m_elem[1].pe == nullptr) bself = true;
         // get its material and check if FEBiphasicFSI
         FEMaterial* pm = fem->GetMaterial(m_elem[j]->GetMatID());
         FEBiphasicFSI* pfsi = dynamic_cast<FEBiphasicFSI*>(pm);
@@ -86,7 +91,7 @@ bool FEBiphasicFSITraction::Init()
         }
         else if (!bself) {
             // extract the second of two elements on this interface
-            m_elem[j] = el.m_elem[1];
+            m_elem[j] = el.m_elem[1].pe;
             pm = fem->GetMaterial(m_elem[j]->GetMatID());
             pfsi = dynamic_cast<FEBiphasicFSI*>(pm);
             if (pfsi == nullptr) return false;
@@ -140,8 +145,10 @@ mat3ds FEBiphasicFSITraction::GetFluidStress(FESurfaceMaterialPoint& pt)
 }
 
 //-----------------------------------------------------------------------------
-void FEBiphasicFSITraction::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
+void FEBiphasicFSITraction::LoadVector(FEGlobalVector& R)
 {
+    const FETimeInfo& tp = GetTimeInfo();
+
     // If surface is bottom of shell, we should take shell displacement dofs (i.e. m_dofSU).
     FEDofList dof = m_bshellb ? m_dofSU : m_dofU;
     m_psurf->LoadVector(R, dof, false, [&](FESurfaceMaterialPoint& mp, const FESurfaceDofShape& dof_a, vector<double>& fa) {
@@ -180,8 +187,10 @@ void FEBiphasicFSITraction::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 }
 
 //-----------------------------------------------------------------------------
-void FEBiphasicFSITraction::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
+void FEBiphasicFSITraction::StiffnessMatrix(FELinearSystem& LS)
 {
+    const FETimeInfo& tp = GetTimeInfo();
+
     FEModel* fem = GetFEModel();
     FESurface* ps = &GetSurface();
     

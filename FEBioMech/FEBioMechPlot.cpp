@@ -30,6 +30,8 @@ SOFTWARE.*/
 #include "FEBioMechPlot.h"
 #include "FEDamageNeoHookean.h"
 #include "FEDamageTransIsoMooneyRivlin.h"
+#include "FEKinematicGrowth.h"
+#include "FEReactiveMaterialPoint.h"
 #include "FEReactiveFatigue.h"
 #include "FEReactivePlasticity.h"
 #include "FEReactivePlasticDamage.h"
@@ -42,7 +44,6 @@ SOFTWARE.*/
 #include "FEElasticMixture.h"
 #include "FEElasticMultigeneration.h"
 #include "FEUT4Domain.h"
-#include "FEBioPlot/FEBioPlotFile.h"
 #include "FEContactSurface.h"
 #include "FERigidBody.h"
 #include <FECore/FESPRProjection.h>
@@ -63,13 +64,91 @@ SOFTWARE.*/
 #include "FESlidingInterface.h"
 #include "FESlidingElasticInterface.h"
 #include "FETiedContactSurface.h"
+#include "FEStickyInterface.h"
 #include "FEReactiveVEMaterialPoint.h"
+#include "FELinearTrussDomain.h"
+#include "FEElasticTrussDomain.h"
 #include <FECore/FESurface.h>
 #include <FECore/FESurfaceLoad.h>
+#include <FECore/FETrussDomain.h>
+#include <FECore/FEElement.h>
+#include <FEBioMech/FEElasticBeamDomain.h>
+#include <FEBioMech/FEElasticBeamMaterial.h>
+#include <FEBioMech/FEEdgeToSurfaceSlidingContact.h>
+#include "FEIdealGasPressure.h"
+#include "FEBodyForce.h"
 
 //=============================================================================
 //                            N O D E   D A T A
 //=============================================================================
+
+//-----------------------------------------------------------------------------
+bool FEPlotNodeDisplacement::Save(FEMesh& m, FEDataStream& a)
+{
+	FEModel* fem = GetFEModel();
+	const int dof_X = fem->GetDOFIndex("x");
+	const int dof_Y = fem->GetDOFIndex("y");
+	const int dof_Z = fem->GetDOFIndex("z");
+
+	writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
+		return node.get_vec3d(dof_X, dof_Y, dof_Z);
+		});
+	return true;
+}
+
+bool FEPlotNodeRotation::Save(FEMesh& m, FEDataStream& a)
+{
+	FEModel* fem = GetFEModel();
+	const int dof_U = fem->GetDOFIndex("u");
+	const int dof_V = fem->GetDOFIndex("v");
+	const int dof_W = fem->GetDOFIndex("w");
+
+	writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
+		return node.get_vec3d(dof_U, dof_V, dof_W);
+		});
+	return true;
+}
+
+bool FEPlotNodeShellDisplacement::Save(FEMesh& m, FEDataStream& a)
+{
+    FEModel* fem = GetFEModel();
+    const int dof_SX = fem->GetDOFIndex("sx");
+    const int dof_SY = fem->GetDOFIndex("sy");
+    const int dof_SZ = fem->GetDOFIndex("sz");
+    
+    writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
+        return node.get_vec3d(dof_SX, dof_SY, dof_SZ);
+    });
+    return true;
+}
+
+bool FEPlotNodalShellDirector::Save(FEMesh& m, FEDataStream& a)
+{
+    writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
+        return (node.HasFlags(FENode::SHELL)) ? node.m_dt : vec3d(0,0,0);
+    });
+    return true;
+}
+
+//! Store the nodal incremental displacements
+bool FEPlotNodeIncrementalDisplacement::Save(FEMesh& m, FEDataStream& a)
+{
+	int N = m.Nodes();
+	if (m_rp.size() != N)
+	{
+		m_rp.resize(N);
+		for (int i = 0; i < N; ++i) m_rp[i] = m.Node(i).m_rt;
+	}
+
+	// loop over all nodes
+	for (int i = 0; i < N; ++i)
+	{
+		vec3d& rt = m.Node(i).m_rt;
+		a << rt - m_rp[i];
+		m_rp[i] = rt;
+	}
+	return true;
+}
 
 //-----------------------------------------------------------------------------
 bool FEPlotNodeVelocity::Save(FEMesh& m, FEDataStream& a)
@@ -98,73 +177,33 @@ bool FEPlotNodeAcceleration::Save(FEMesh& m, FEDataStream& a)
 //! Store nodal reaction forces
 bool FEPlotNodeReactionForces::Save(FEMesh& m, FEDataStream& a)
 {
-	int NN = m.Nodes();
-	vector<vec3d> F(NN, vec3d(0, 0, 0));
-
-	for (int i = 0; i < m.Domains(); ++i)
-	{
-		FEElasticSolidDomain* dom = dynamic_cast<FEElasticSolidDomain*>(&m.Domain(i));
-		if (dom)
-		{
-			FERigidMaterial* prm = dynamic_cast<FERigidMaterial*>(dom->GetMaterial());
-			if (prm == nullptr)
-			{
-				int NE = dom->Elements();
-				for (int i = 0; i < NE; ++i)
-				{
-					// get the element
-					FESolidElement& el = dom->Element(i);
-
-					if (el.isActive()) {
-						// element force vector
-						vector<double> fe;
-						vector<int> lm;
-
-						// get the element force vector and initialize it to zero
-						int ndof = 3 * el.Nodes();
-						fe.assign(ndof, 0);
-
-						// calculate internal force vector
-						dom->ElementInternalForce(el, fe);
-
-						// assemble into F
-						for (size_t j = 0; j < el.Nodes(); ++j)
-						{
-							vec3d rj(fe[3 * j], fe[3 * j + 1], fe[3 * j + 2]);
-							F[el.m_node[j]] += rj;
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// write nodal forces
-	for (int i = 0; i < m.Nodes(); ++i)
-	{
-		a << F[i];
-	}
-
-/*
-	// NOTE: The problem with the original code below is that for nodes attached 
-	//       to rigid bodies the reaction forces will actually be the rigid reaction forces. 
-	//       That's why I'm trying something else above. 
+	// NOTE: Currently, for nodes attached to rigid bodies the reaction forces 
+	//       will actually be the rigid reaction forces. 
 	FEModel& fem = *GetFEModel();
 	int dofX = fem.GetDOFIndex("x");
 	int dofY = fem.GetDOFIndex("y");
 	int dofZ = fem.GetDOFIndex("z");
-	writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
-		return node.get_load3(dofX, dofY, dofZ);
-	});
-*/
-	return true;
+	if ((dofX >= 0) && (dofY >= 0) && (dofZ >= 0))
+	{
+		writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
+			return node.get_load3(dofX, dofY, dofZ);
+			});
+		return true;
+	}
+	else
+		return false;
 }
 
 //=============================================================================
 //                       S U R F A C E    D A T A
 //=============================================================================
 
-//-----------------------------------------------------------------------------
+bool FEPlotContactGap::SetFilter(const char* szfilter)
+{
+	if (szfilter) m_interfaceName = szfilter;
+	return (szfilter != nullptr);
+}
+
 // Plot contact gap
 bool FEPlotContactGap::Save(FESurface& surf, FEDataStream& a)
 {
@@ -173,20 +212,27 @@ bool FEPlotContactGap::Save(FESurface& surf, FEDataStream& a)
 
 	// make sure the corresponding contact interface is active
 	// (in case the parent was not set, we'll proceed regardless)
-	FEContactInterface* pci = pcs->GetContactInterface(); assert(pci);
-	if ((pci == 0) || pci->IsActive())
+	FEContactInterface* pci = pcs->GetContactInterface();
+	bool write = false;
+	if (pci == nullptr) write = true;
+	else if (pci->IsActive())
+	{
+		if (m_interfaceName.empty() || (m_interfaceName == pci->GetName())) write = true;
+	}
+
+	if (write)
 	{
 		// NOTE: the sliding surface does not use material points, so we need this little hack. 
-		FESlidingSurface* ss = dynamic_cast<FESlidingSurface*>(pcs);
-		if (ss)
+		FESlidingSurface* slidingSurface = dynamic_cast<FESlidingSurface*>(pcs);
+		if (slidingSurface)
 		{
-			for (int i = 0; i < ss->Elements(); ++i)
+			for (int i = 0; i < slidingSurface->Elements(); ++i)
 			{
-				FEElement& el = ss->Element(i);
+				FEElement& el = slidingSurface->Element(i);
 				double g = 0.0;
 				for (int j = 0; j < el.Nodes(); ++j)
 				{
-					double gj = ss->m_data[el.m_lnode[j]].m_gap;
+					double gj = slidingSurface->m_data[el.m_lnode[j]].m_gap;
 					g += gj;
 				}
 				g /= el.Nodes();
@@ -195,16 +241,34 @@ bool FEPlotContactGap::Save(FESurface& surf, FEDataStream& a)
 			return true;
 		}
 
-		FETiedContactSurface* ts = dynamic_cast<FETiedContactSurface*>(pcs);
-		if (ts)
+		FETiedContactSurface* tiedSurface = dynamic_cast<FETiedContactSurface*>(pcs);
+		if (tiedSurface)
 		{
-			for (int i = 0; i < ts->Elements(); ++i)
+			for (int i = 0; i < tiedSurface->Elements(); ++i)
 			{
-				FEElement& el = ts->Element(i);
+				FEElement& el = tiedSurface->Element(i);
 				double g = 0.0;
 				for (int j = 0; j < el.Nodes(); ++j)
 				{
-					double gj = ts->m_data[el.m_lnode[j]].m_gap;
+					double gj = tiedSurface->m_data[el.m_lnode[j]].m_gap;
+					g += gj;
+				}
+				g /= el.Nodes();
+				a << g;
+			}
+			return true;
+		}
+
+		FEStickySurface* stickySurface = dynamic_cast<FEStickySurface*>(pcs);
+		if (stickySurface)
+		{
+			for (int i = 0; i < stickySurface->Elements(); ++i)
+			{
+				FEElement& el = stickySurface->Element(i);
+				double g = 0.0;
+				for (int j = 0; j < el.Nodes(); ++j)
+				{
+					double gj = stickySurface->m_data[el.m_lnode[j]].scalar_gap;
 					g += gj;
 				}
 				g /= el.Nodes();
@@ -214,7 +278,7 @@ bool FEPlotContactGap::Save(FESurface& surf, FEDataStream& a)
 		}
 
 		writeAverageElementValue<double>(surf, a, [=](const FEMaterialPoint& mp) {
-			const FEContactMaterialPoint* pt = mp.ExtractData<FEContactMaterialPoint>();
+			const FEContactMaterialPoint* pt = dynamic_cast<const FEContactMaterialPoint*>(&mp);
 			return (pt ? pt->m_gap : 0.0);
 			});
 
@@ -245,7 +309,12 @@ bool FEPlotVectorGap::Save(FESurface& surf, FEDataStream& a)
 	return false;
 }
 
-//-----------------------------------------------------------------------------
+bool FEPlotContactPressure::SetFilter(const char* szfilter)
+{
+	if (szfilter) m_interfaceName = szfilter;
+	return (szfilter != nullptr);
+}
+
 // Plot contact pressure
 bool FEPlotContactPressure::Save(FESurface &surf, FEDataStream& a)
 {
@@ -254,20 +323,27 @@ bool FEPlotContactPressure::Save(FESurface &surf, FEDataStream& a)
     
 	// make sure the corresponding contact interface is active
 	// (in case the parent was not set, we'll proceed regardless)
-	FEContactInterface* pci = pcs->GetContactInterface(); assert(pci);
-	if ((pci == 0) || pci->IsActive())
+	FEContactInterface* pci = pcs->GetContactInterface();
+	bool write = false;
+	if (pci == nullptr) write = true;
+	else if (pci->IsActive())
+	{
+		if (m_interfaceName.empty() || (m_interfaceName == pci->GetName())) write = true;
+	}
+
+	if (write)
 	{
 		// NOTE: the sliding surface does not use material points, so we need this little hack. 
-		FESlidingSurface* ss = dynamic_cast<FESlidingSurface*>(pcs);
-		if (ss)
+		FESlidingSurface* slidingSurface = dynamic_cast<FESlidingSurface*>(pcs);
+		if (slidingSurface)
 		{
-			for (int i = 0; i < ss->Elements(); ++i)
+			for (int i = 0; i < slidingSurface->Elements(); ++i)
 			{
-				FEElement& el = ss->Element(i);
+				FEElement& el = slidingSurface->Element(i);
 				double Lm = 0.0;
 				for (int j = 0; j < el.Nodes(); ++j)
 				{
-					double Lmj = ss->m_data[el.m_lnode[j]].m_Ln;
+					double Lmj = slidingSurface->m_data[el.m_lnode[j]].m_Ln;
 					Lm += Lmj;
 				}
 				Lm /= el.Nodes();
@@ -277,7 +353,7 @@ bool FEPlotContactPressure::Save(FESurface &surf, FEDataStream& a)
 		}
 
 		writeAverageElementValue<double>(surf, a, [](const FEMaterialPoint& mp) {
-			const FEContactMaterialPoint* pt = mp.ExtractData<FEContactMaterialPoint>();
+			const FEContactMaterialPoint* pt = dynamic_cast<const FEContactMaterialPoint*>(&mp);
 			return (pt ? pt->m_Ln : 0.0);
 		});
 		return true;
@@ -285,7 +361,12 @@ bool FEPlotContactPressure::Save(FESurface &surf, FEDataStream& a)
 	return false;
 }
 
-//-----------------------------------------------------------------------------
+bool FEPlotContactTraction::SetFilter(const char* szfilter)
+{
+	if (szfilter) m_interfaceName = szfilter;
+	return (szfilter != nullptr);
+}
+
 // Plot contact traction
 bool FEPlotContactTraction::Save(FESurface &surf, FEDataStream& a)
 {
@@ -294,8 +375,15 @@ bool FEPlotContactTraction::Save(FESurface &surf, FEDataStream& a)
 
 	// make sure the corresponding contact interface is active
 	// (in case the parent was not set, we'll proceed regardless)
-	FEContactInterface* pci = pcs->GetContactInterface(); assert(pci);
-	if ((pci == 0) || pci->IsActive())
+	FEContactInterface* pci = pcs->GetContactInterface();
+	bool write = false;
+	if (pci == nullptr) write = true;
+	else if (pci->IsActive())
+	{
+		if (m_interfaceName.empty() || (m_interfaceName == pci->GetName())) write = true;
+	}
+
+	if (write)
 	{
 		writeElementValue<vec3d>(surf, a, [=](int nface) {
 			vec3d tn;
@@ -336,7 +424,7 @@ bool FEPlotNodalContactGap::Save(FESurface& surf, FEDataStream& a)
 		}
 
 		writeNodalProjectedElementValues<double>(surf, a, [](const FEMaterialPoint& mp) {
-			const FEContactMaterialPoint* pt = mp.ExtractData<FEContactMaterialPoint>();
+			const FEContactMaterialPoint* pt = dynamic_cast<const FEContactMaterialPoint*>(&mp);
 			return (pt ? pt->m_gap : 0.0);
 			});
 		return true;
@@ -386,7 +474,7 @@ bool FEPlotNodalContactPressure::Save(FESurface &surf, FEDataStream& a)
 	if ((pci == 0) || pci->IsActive())
 	{
 		writeNodalProjectedElementValues<double>(surf, a, [](const FEMaterialPoint& mp) {
-			const FEContactMaterialPoint* pt = mp.ExtractData<FEContactMaterialPoint>();
+			const FEContactMaterialPoint* pt = dynamic_cast<const FEContactMaterialPoint*>(&mp);
 			return (pt ? pt->m_Ln : 0.0);
 			});
 
@@ -552,9 +640,12 @@ bool FEPlotContactPenalty::Save(FESurface& surf, FEDataStream& a)
 		FEFacetSlidingSurface* ps = dynamic_cast<FEFacetSlidingSurface*>(&surf);
 		if (ps)
 		{
-			writeAverageElementValue<double>(surf, a, [](const FEMaterialPoint& mp) {
-				const FEFacetSlidingSurface::Data& pt = *mp.ExtractData<FEFacetSlidingSurface::Data>();
-				return pt.m_eps;
+			FEFacet2FacetSliding* pf2f = dynamic_cast<FEFacet2FacetSliding*>(pci);
+			double eps = (pf2f ? pf2f->m_epsn : 1);
+
+			writeAverageElementValue<double>(surf, a, [=](const FEMaterialPoint& mp) {
+				const FEFacetSlidingSurface::Data* pt = dynamic_cast<const FEFacetSlidingSurface::Data*>(&mp);
+				return (pt ? eps*pt->m_eps : 0);
 				});
 			return true;
 		}
@@ -562,9 +653,11 @@ bool FEPlotContactPenalty::Save(FESurface& surf, FEDataStream& a)
 		FESlidingElasticSurface* pse = dynamic_cast<FESlidingElasticSurface*>(&surf);
 		if (pse)
 		{
-			writeAverageElementValue<double>(surf, a, [](const FEMaterialPoint& mp) {
-				const FESlidingElasticSurface::Data& pt = *mp.ExtractData<FESlidingElasticSurface::Data>();
-				return pt.m_epsn;
+			FESlidingElasticInterface* psei = dynamic_cast<FESlidingElasticInterface*>(pci);
+			double epsn = (psei ? psei->m_epsn : 1);
+			writeAverageElementValue<double>(surf, a, [=](const FEMaterialPoint& mp) {
+				const FESlidingElasticSurface::Data* pt = dynamic_cast<const FESlidingElasticSurface::Data*>(&mp);
+				return (pt ? epsn*pt->m_epsn : 0);
 				});
 			return true;
 		}
@@ -576,7 +669,7 @@ bool FEPlotContactPenalty::Save(FESurface& surf, FEDataStream& a)
 //-----------------------------------------------------------------------------
 bool FEPlotContactStatus::Save(FESurface& surf, FEDataStream& a)
 {
-	FEFacetSlidingSurface* ps = dynamic_cast<FEFacetSlidingSurface*>(&surf);
+	FEContactSurface* ps = dynamic_cast<FEContactSurface*>(&surf);
 	if (ps == nullptr) return false;
 
 	// make sure the corresponding contact interface is active
@@ -592,10 +685,8 @@ bool FEPlotContactStatus::Save(FESurface& surf, FEDataStream& a)
 			int nint = el.GaussPoints();
 			for (int j = 0; j < nint; ++j)
 			{
-				FEMaterialPoint& mp = *el.GetMaterialPoint(j);
-				FEFacetSlidingSurface::Data& pt = *mp.ExtractData<FEFacetSlidingSurface::Data>();
-
-				if (pt.m_pme) nc++;
+				FEContactMaterialPoint* mp = dynamic_cast<FEContactMaterialPoint*>(el.GetMaterialPoint(j));
+				if (mp && mp->m_pme) nc++;
 			}
 
 			a << nc;
@@ -640,6 +731,26 @@ bool FEPlotEnclosedVolume::Save(FESurface &surf, FEDataStream &a)
 }
 
 //-----------------------------------------------------------------------------
+bool FEPlotEnclosedVolumeChange::Save(FESurface &surf, FEDataStream &a)
+{
+    FESurface* pcs = &surf;
+    if (pcs == 0) return false;
+    
+    writeIntegratedElementValue<double>(surf, a, [=](const FEMaterialPoint& mp) {
+        FESurfaceElement& el = static_cast<FESurfaceElement&>(*mp.m_elem);
+        int n = mp.m_index;
+        vec3d xi = pcs->Local2Global(el, n);
+        vec3d g[2];
+        pcs->CoBaseVectors(el, n, g);
+        vec3d Xi = pcs->Local2Global0(el, n);
+        vec3d G[2];
+        pcs->CoBaseVectors0(el, n, G);
+        return (xi*(g[0] ^ g[1]) - Xi*(G[0] ^ G[1])) / 3;
+    });
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 bool FEPlotSurfaceArea::Save(FESurface &surf, FEDataStream &a)
 {
     FESurface* pcs = &surf;
@@ -673,26 +784,76 @@ bool FEPlotFacetArea::Save(FESurface& surf, FEDataStream& a)
 bool FEPlotScalarSurfaceLoad::Save(FESurface &surf, FEDataStream& a)
 {
     FEModel* fem = GetFEModel();
-    int nsl = fem->SurfaceLoads();
+    int nsl = fem->ModelLoads();
     FESurfaceLoad* psl = nullptr;
     for (int i = 0; i<nsl; ++i)
     {
-        psl = fem->SurfaceLoad(i);
-        if (&psl->GetSurface() == &surf) break;
+        psl = dynamic_cast<FESurfaceLoad*>(fem->ModelLoad(i));
+        if (psl && (&psl->GetSurface() == &surf)) break;
     }
 
     if (psl == nullptr) return false;
     
     if (psl->IsActive()) {
         writeAverageElementValue<double>(surf, a, [=](const FEMaterialPoint& mp) {
-            const FESurfaceMaterialPoint* pt = mp.ExtractData<FESurfaceMaterialPoint>();
-            FESurfaceMaterialPoint pnc(*pt);
-            return (pt ? psl->ScalarLoad(pnc) : 0.0);
+			const FESurfaceMaterialPoint* pt = dynamic_cast<const FESurfaceMaterialPoint*>(&mp);
+			return (pt ? psl->ScalarLoad(*const_cast<FESurfaceMaterialPoint*>(pt)) : 0.0);
         });
         return true;
     }
     return false;
 }
+
+//-----------------------------------------------------------------------------
+bool FEPlotNetSurfaceReactionForce::Save(FESurface& surf, FEDataStream& a)
+{
+	// NOTE: Currently, for nodes attached to rigid bodies the reaction forces 
+	//       will actually be the rigid reaction forces. 
+	FEModel& fem = *GetFEModel();
+	int dofX = fem.GetDOFIndex("x");
+	int dofY = fem.GetDOFIndex("y");
+	int dofZ = fem.GetDOFIndex("z");
+	if ((dofX < 0) || (dofY < 0) || (dofZ < 0)) return false;
+
+	vec3d F(0, 0, 0);
+	for (int i = 0; i < surf.Nodes(); ++i)
+	{
+		FENode& n = surf.Node(i);
+		vec3d Fi = n.get_load3(dofX, dofY, dofZ);
+		F += Fi;
+	}
+
+	a << F;
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotNetSurfaceReactionMoment::Save(FESurface& surf, FEDataStream& a)
+{
+	// NOTE: Currently, for nodes attached to rigid bodies the reaction forces 
+	//       will actually be the rigid reaction forces. 
+	FEModel& fem = *GetFEModel();
+	int dofX = fem.GetDOFIndex("x");
+	int dofY = fem.GetDOFIndex("y");
+	int dofZ = fem.GetDOFIndex("z");
+	if ((dofX < 0) || (dofY < 0) || (dofZ < 0)) return false;
+
+	vec3d M(0, 0, 0);
+	for (int i = 0; i < surf.Nodes(); ++i)
+	{
+		FENode& n = surf.Node(i);
+		vec3d Fi = n.get_load3(dofX, dofY, dofZ);
+		vec3d r = n.m_rt;
+		vec3d Mi = r ^ Fi;
+		M += Mi;
+	}
+
+	a << M;
+
+	return true;
+}
+
 
 //=============================================================================
 //							D O M A I N   D A T A
@@ -737,14 +898,32 @@ public:
 	}
 };
 
+class FEStrain
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        FEElement* el = mp.m_elem;
+        FEShellElementNew* se = dynamic_cast<FEShellElementNew*>(el);
+        const FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+        if (se) return (se->m_E[mp.m_index].norm() > 0) ? se->m_E[mp.m_index] : pt->Strain();
+        else return (pt ? pt->Strain() : mat3ds(0));
+    }
+};
+
 //-----------------------------------------------------------------------------
 //! Store the average stresses for each element. 
 bool FEPlotElementStress::Save(FEDomain& dom, FEDataStream& a)
 {
+	FEDomainParameter* var = nullptr;
 	FESolidMaterial* pme = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
-	if ((pme == 0) || pme->IsRigid()) return false;
+	if (pme)
+	{
+		if (!pme->IsRigid())
+			var = pme->FindDomainParameter("stress");
+	}
+	else var = dom.GetMaterial()->FindDomainParameter("stress");
 
-	FEDomainParameter* var = pme->FindDomainParameter("stress");
 	if (var == nullptr) return false;
 
 	writeAverageElementValue<mat3ds>(dom, a, var);
@@ -790,6 +969,93 @@ bool FEPlotElementPK1Stress::Save(FEDomain& dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
+//! Store the average element plastic yield stress
+bool FEPlotElementPlasticYieldStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    FESolidMaterial* pme = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
+    if ((pme == 0) || pme->IsRigid()) return false;
+    FEReactivePlasticity* pmp = pme->ExtractProperty<FEReactivePlasticity>();
+    if (pmp == nullptr) return false;
+
+    writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
+        const FEReactivePlasticityMaterialPoint& pp = *mp.ExtractData<FEReactivePlasticityMaterialPoint>();
+        if (pp.m_Kv.size() > 0) return pp.m_Kv[0];
+        return 0.0;
+    });
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+//! Store the average element yield stress based on Drucker shear stress criterion
+bool FEPlotElementDruckerShear::Save(FEDomain& dom, FEDataStream& a)
+{
+    FESolidMaterial* pme = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
+    if ((pme == 0) || pme->IsRigid()) return false;
+    FEDamageCriterionDrucker* pmd = pme->ExtractProperty<FEDamageCriterionDrucker>();
+    if (pmd == nullptr) return false;
+
+    writeAverageElementValue<double>(dom, a, [&pmd](const FEMaterialPoint& mp) {
+        double c = pmd->m_c(mp);
+        const FEElasticMaterialPoint& ep = *mp.ExtractData< FEElasticMaterialPoint>();
+        mat3ds s = ep.m_s;    // Cauchy stress
+        mat3ds sdev = s.dev();
+        double J2 = 0.5*(sdev*sdev).trace();
+        double J3 = sdev.det();
+        double k = pow(pow(J2,3) - c*pow(J3,2),1./6.);
+        return k;
+        });
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+//! Store the average element yield stress based on Prager-Drucker criterion
+bool FEPlotElementPragerDruckerStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    FESolidMaterial* pme = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
+    if ((pme == 0) || pme->IsRigid()) return false;
+    FEDamageCriterionDruckerPrager* pmd = pme->ExtractProperty<FEDamageCriterionDruckerPrager>();
+    if (pmd == nullptr) return false;
+
+    writeAverageElementValue<double>(dom, a, [&pmd](const FEMaterialPoint& mp) {
+        double b = pmd->m_b(mp);
+        const FEElasticMaterialPoint& ep = *mp.ExtractData< FEElasticMaterialPoint>();
+        mat3ds s = ep.m_s;    // Cauchy stress
+        double se = sqrt((pow(s.xx()-s.yy(),2) + pow(s.yy()-s.zz(),2) + pow(s.zz()-s.xx(),2)
+                           + 6*(pow(s.xy(),2) + pow(s.yz(),2) + pow(s.xz(),2)))/2);
+        double sm = s.tr()/3;
+        double Phi = se - b*sm;
+        return Phi;
+        });
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+//! Store the average element yield stress based on Deshpande-Fleck criterion
+bool FEPlotElementDeshpandeFleckStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    FESolidMaterial* pme = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
+    if ((pme == 0) || pme->IsRigid()) return false;
+    FEDamageCriterionDeshpandeFleck* pmd = pme->ExtractProperty<FEDamageCriterionDeshpandeFleck>();
+    if (pmd == nullptr) return false;
+
+    writeAverageElementValue<double>(dom, a, [&pmd](const FEMaterialPoint& mp) {
+        double beta = pmd->m_beta(mp);
+        const FEElasticMaterialPoint& ep = *mp.ExtractData< FEElasticMaterialPoint>();
+        mat3ds s = ep.m_s;  // Cauchy stress
+        double se = sqrt((pow(s.xx()-s.yy(),2) + pow(s.yy()-s.zz(),2) + pow(s.zz()-s.xx(),2)
+                           + 6*(pow(s.xy(),2) + pow(s.yz(),2) + pow(s.xz(),2)))/2);
+        double sm = s.tr()/3;
+        double Phi = sqrt((se*se+pow(3*beta*sm,2))/(1+beta*beta));
+        return Phi;
+        });
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 bool FEPlotSPRStresses::Save(FEDomain& dom, FEDataStream& a)
 {
 	// For now, this is only available for solid domains
@@ -818,26 +1084,114 @@ bool FEPlotSPRLinearStresses::Save(FEDomain& dom, FEDataStream& a)
 //-----------------------------------------------------------------------------
 bool FEPlotNodalStresses::Save(FEDomain& dom, FEDataStream& a)
 {
+    if (dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // new shell elements should be excluded
 	writeNodalProjectedElementValues<mat3ds>(dom, a, FEStress());
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellTopStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellElementValues<mat3ds>(dom, a, FEStress(), false);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellBottomStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellElementValues<mat3ds>(dom, a, FEStress(), true);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellTopNodalStresses::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellNodalProjectedElementValues<mat3ds>(dom, a, FEStress(), false);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellBottomNodalStresses::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellNodalProjectedElementValues<mat3ds>(dom, a, FEStress(), true);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotNodalStrains::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // new shell elements should be excluded
+    writeNodalProjectedElementValues<mat3ds>(dom, a, FEStrain());
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellTopStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellElementValues<mat3ds>(dom, a, FEStrain(), false);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellBottomStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellElementValues<mat3ds>(dom, a, FEStrain(), true);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellTopNodalStrains::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellNodalProjectedElementValues<mat3ds>(dom, a, FEStrain(), false);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotShellBottomNodalStrains::Save(FEDomain& dom, FEDataStream& a)
+{
+    if (!dynamic_cast<FESSIShellDomain*>(&dom)) return false;  // only use with new shell elements
+    writeShellNodalProjectedElementValues<mat3ds>(dom, a, FEStrain(), true);
+    return true;
 }
 
 //=============================================================================
 FEPlotElementMixtureStress::FEPlotElementMixtureStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM) 
 {
+	m_mat = -1;
 	m_comp = -1;
+	SetUnits(UNIT_PRESSURE);
 }
 
 bool FEPlotElementMixtureStress::SetFilter(const char* szfilter)
 {
-	sscanf(szfilter, "solid[%d]", &m_comp);
+	if (strncmp(szfilter, "material", 8) == 0)
+	{
+		if (sscanf(szfilter, "material[%d].solid[%d]", &m_mat, &m_comp) != 2) return false;
+	}
+	else
+	{
+		if (sscanf(szfilter, "solid[%d]", &m_comp) != 1) return false;
+	}
 	return true;
 }
 
 bool FEPlotElementMixtureStress::Save(FEDomain& dom, FEDataStream& a)
 {
+	FEMaterial* pm = dom.GetMaterial();
+	if (m_mat != -1)
+	{
+		if (pm != GetFEModel()->GetMaterial(m_mat)) return false;
+	}
+
 	// make sure we start from the elastic component
-	FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+	FEElasticMaterial* pmat = pm->ExtractProperty<FEElasticMaterial>();
 	if (pmat == nullptr) return false;
 
 	// make sure this is a mixture
@@ -857,7 +1211,7 @@ bool FEPlotElementMixtureStress::Save(FEDomain& dom, FEDataStream& a)
 		{
 			FEMaterialPoint& mp = *el.GetMaterialPoint(n);
 			FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
-			if (mmp)
+			if (mmp && (m_comp < mmp->Components()))
 			{
 				FEElasticMaterialPoint& ep = *mmp->GetPointData(m_comp)->ExtractData<FEElasticMaterialPoint>();
 				savg += ep.m_s;
@@ -925,6 +1279,30 @@ bool FEPlotElementElasticity::Save(FEDomain& dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
+//! Store the average deviatoric elasticity for each element.
+
+class FEElementDevElasticity
+{
+public:
+    FEElementDevElasticity(FEUncoupledMaterial* pm) : m_mat(pm) {}
+    tens4ds operator()(const FEMaterialPoint& mp)
+    {
+        return m_mat->DevTangent(const_cast<FEMaterialPoint&>(mp));
+    }
+private:
+    FEUncoupledMaterial*    m_mat;
+};
+
+bool FEPlotElementDevElasticity::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEUncoupledMaterial* pme = dom.GetMaterial()->ExtractProperty<FEUncoupledMaterial>();
+    if ((pme == 0) || pme->IsRigid()) return false;
+    
+    writeAverageElementValue<tens4ds>(dom, a, FEElementDevElasticity(pme));
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 class FEStrainEnergy
 {
 public:
@@ -982,20 +1360,192 @@ bool FEPlotDevStrainEnergyDensity::Save(FEDomain &dom, FEDataStream& a)
 class FESpecificStrainEnergy
 {
 public:
+    FESpecificStrainEnergy(FEElasticMaterial* pm, int comp) : m_mat(pm), m_comp(comp) {}
 	double operator()(const FEMaterialPoint& mp)
 	{
-		const FERemodelingMaterialPoint* rpt = mp.ExtractData<FERemodelingMaterialPoint>();
-		return (rpt ? rpt->m_sed / rpt->m_rhor : 0.0);
+        if (dynamic_cast<FERemodelingInterface*>(m_mat) == 0) return 0;
+		FEMaterialPoint& lmp = const_cast<FEMaterialPoint&>(mp);
+		FERemodelingMaterialPoint* rpt = lmp.ExtractData<FERemodelingMaterialPoint>();
+        if (rpt == nullptr) {
+            FEMaterialPoint* pt = lmp.ExtractData<FEElasticMixtureMaterialPoint>()->GetPointData(m_comp);
+            rpt = pt->ExtractData<FERemodelingMaterialPoint>();
+        }
+		return (((rpt != nullptr) && (rpt->m_rhor > 0)) ? rpt->m_sed / rpt->m_rhor : 0.0);
 	}
+private:
+    FEElasticMaterial*    m_mat;
+    int                   m_comp;
 };
 
 bool FEPlotSpecificStrainEnergy::Save(FEDomain &dom, FEDataStream& a)
 {
-	if (dom.Class() != FE_DOMAIN_SOLID) return false;
-	FESpecificStrainEnergy E;
-	writeAverageElementValue<double>(dom, a, E);
+    FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+    if (pme == 0) return false;
+    
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        FESpecificStrainEnergy w(pme, -1);
+        writeAverageElementValue<double>(dom, a, w);
+        return true;
+    }
+    return false;
+}
 
-	return true;
+//=============================================================================
+FEPlotMixtureStrainEnergyDensity::FEPlotMixtureStrainEnergyDensity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_mat = -1;
+    m_comp = -1;
+    SetUnits(UNIT_PRESSURE);
+}
+
+bool FEPlotMixtureStrainEnergyDensity::SetFilter(const char* szfilter)
+{
+    if (strncmp(szfilter, "material", 8) == 0)
+    {
+        if (sscanf(szfilter, "material[%d].solid[%d]", &m_mat, &m_comp) != 2) return false;
+    }
+    else
+    {
+        if (sscanf(szfilter, "solid[%d]", &m_comp) != 1) return false;
+    }
+    return true;
+}
+
+bool FEPlotMixtureStrainEnergyDensity::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEMaterial* pm = dom.GetMaterial();
+    if (m_mat != -1)
+    {
+        if (pm != GetFEModel()->GetMaterial(m_mat)) return false;
+    }
+
+    // make sure we start from the elastic component
+    FEElasticMaterial* pmat = pm->ExtractProperty<FEElasticMaterial>();
+    if (pmat == nullptr) return false;
+
+    // make sure this is a mixture
+    FEElasticMixture* pmm = dynamic_cast<FEElasticMixture*>(pmat);
+    FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+    if ((pmm == nullptr) && (pum == nullptr)) return false;
+
+    // get the mixture component
+    if (m_comp < 0) return false;
+    FEElasticMaterial* pme = nullptr;
+    if (pmm) pme = pmm->GetMaterial(m_comp);
+    else if (pum) pme = pum->GetMaterial(m_comp);
+
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        FEStrainEnergy W(pme);
+        writeAverageElementValue<double>(dom, a, W);
+        return true;
+    }
+    return false;
+}
+
+//=============================================================================
+FEPlotMixtureDevStrainEnergyDensity::FEPlotMixtureDevStrainEnergyDensity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_mat = -1;
+    m_comp = -1;
+    SetUnits(UNIT_PRESSURE);
+}
+
+bool FEPlotMixtureDevStrainEnergyDensity::SetFilter(const char* szfilter)
+{
+    if (strncmp(szfilter, "material", 8) == 0)
+    {
+        if (sscanf(szfilter, "material[%d].solid[%d]", &m_mat, &m_comp) != 2) return false;
+    }
+    else
+    {
+        if (sscanf(szfilter, "solid[%d]", &m_comp) != 1) return false;
+    }
+    return true;
+}
+
+bool FEPlotMixtureDevStrainEnergyDensity::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEMaterial* pm = dom.GetMaterial();
+    if (m_mat != -1)
+    {
+        if (pm != GetFEModel()->GetMaterial(m_mat)) return false;
+    }
+
+    // make sure we start from the elastic component
+    FEElasticMaterial* pmat = pm->ExtractProperty<FEElasticMaterial>();
+    if (pmat == nullptr) return false;
+
+    // make sure this is a mixture
+    FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+    if (pum == nullptr) return false;
+
+    // get the mixture component
+    if (m_comp < 0) return false;
+    FEElasticMaterial* pme = pum->GetMaterial(m_comp);
+    FEUncoupledMaterial* pmu = pme->ExtractProperty<FEUncoupledMaterial>();
+
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        FEDevStrainEnergy devW(pmu);
+        writeAverageElementValue<double>(dom, a, devW);
+        return true;
+    }
+    return false;
+}
+
+//=============================================================================
+FEPlotMixtureSpecificStrainEnergy::FEPlotMixtureSpecificStrainEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_mat = -1;
+    m_comp = -1;
+    SetUnits(UNIT_SPECIFIC_ENERGY);
+}
+
+bool FEPlotMixtureSpecificStrainEnergy::SetFilter(const char* szfilter)
+{
+    if (strncmp(szfilter, "material", 8) == 0)
+    {
+        if (sscanf(szfilter, "material[%d].solid[%d]", &m_mat, &m_comp) != 2) return false;
+    }
+    else
+    {
+        if (sscanf(szfilter, "solid[%d]", &m_comp) != 1) return false;
+    }
+    return true;
+}
+
+bool FEPlotMixtureSpecificStrainEnergy::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEMaterial* pm = dom.GetMaterial();
+    if (m_mat != -1)
+    {
+        if (pm != GetFEModel()->GetMaterial(m_mat)) return false;
+    }
+
+    // make sure we start from the elastic component
+    FEElasticMaterial* pmat = pm->ExtractProperty<FEElasticMaterial>();
+    if (pmat == nullptr) return false;
+
+    // make sure this is a mixture
+    FEElasticMixture* pmm = dynamic_cast<FEElasticMixture*>(pmat);
+    FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+    if ((pmm == nullptr) && (pum == nullptr)) return false;
+
+    // get the mixture component
+    if (m_comp < 0) return false;
+    FEElasticMaterial* pme = nullptr;
+    if (pmm) pme = pmm->GetMaterial(m_comp);
+    else if (pum) pme = pum->GetMaterial(m_comp);
+
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        FESpecificStrainEnergy w(pme, m_comp);
+        writeAverageElementValue<double>(dom, a, w);
+        return true;
+    }
+    return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -1133,8 +1683,8 @@ bool FEPlotDensity::Save(FEDomain &dom, FEDataStream& a)
 	if (dom.Class() == FE_DOMAIN_SOLID)
 	{
 		FESolidDomain& bd = static_cast<FESolidDomain&>(dom);
-		FEElasticMaterial* em = dynamic_cast<FEElasticMaterial*>(bd.GetMaterial());
-		if (em == 0) return false;
+		FEElasticMaterial* em = bd.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+        if (em == 0) return false;
 
 		FERemodelingElasticMaterial* rm = dynamic_cast<FERemodelingElasticMaterial*>(em);
 		if (rm)
@@ -1152,7 +1702,7 @@ bool FEPlotDensity::Save(FEDomain &dom, FEDataStream& a)
 	}
 	else if (dom.Class() == FE_DOMAIN_SHELL)
 	{
-		FEElasticMaterial* em = dynamic_cast<FEElasticMaterial*>(dom.GetMaterial());
+        FEElasticMaterial* em = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
 		if (em == 0) return false;
 		FEDensity dens(em);
 		writeAverageElementValue<double>(dom, a, dens);
@@ -1239,9 +1789,8 @@ bool FEPlotElementCenterOfMass::Save(FEDomain &dom, FEDataStream& a)
 			for (int j = 0; j<el.GaussPoints(); ++j)
 			{
 				FEMaterialPoint& mp = *el.GetMaterialPoint(j);
-				FEElasticMaterialPoint& pt = *(mp.ExtractData<FEElasticMaterialPoint>());
 				double detJ = bd.detJ0(el, j)*gw[j];
-				ew += pt.m_rt*(pme->Density(mp)*detJ);
+				ew += mp.m_rt*(pme->Density(mp)*detJ);
 				m += pme->Density(mp)*detJ;
 			}
 
@@ -1263,7 +1812,7 @@ bool FEPlotElementCenterOfMass::Save(FEDomain &dom, FEDataStream& a)
 			double m = 0;
 			for (int j = 0; j<el.GaussPoints(); ++j)
 			{
-				FEElasticMaterialPoint& pt = *(el.GetMaterialPoint(j)->ExtractData<FEElasticMaterialPoint>());
+				FEMaterialPoint& pt = *el.GetMaterialPoint(j);
 				double detJ = bd->detJ0(el, j)*gw[j];
 				ew += pt.m_rt*(pme->Density(pt)*detJ);
 				m += pme->Density(pt)*detJ;
@@ -1321,7 +1870,7 @@ public:
 	vec3d operator()(const FEMaterialPoint& mp)
 	{
 		const FEElasticMaterialPoint& pt = *(mp.ExtractData<FEElasticMaterialPoint>());
-		return (pt.m_rt ^ pt.m_v)*m_mat->Density(const_cast<FEMaterialPoint&>(mp));
+		return (mp.m_rt ^ pt.m_v)*m_mat->Density(const_cast<FEMaterialPoint&>(mp));
 	}
 
 private:
@@ -1551,7 +2100,7 @@ bool FEPlotCurrentElementCenterOfMass::Save(FEDomain &dom, FEDataStream& a)
             vec3d rt[NELN], st[NELN], rn[NELN];
             for (int j=0; j<el.Nodes(); ++j) {
                 rt[j] = mesh.Node(el.m_node[j]).m_rt;
-                st[j] = mesh.Node(el.m_node[j]).m_st();
+                st[j] = mesh.Node(el.m_node[j]).st();
             }
             
             // evaluate velocities at integration points
@@ -1725,7 +2274,7 @@ bool FEPlotCurrentElementAngularMomentum::Save(FEDomain &dom, FEDataStream& a)
             vec3d vt[NELN], wt[NELN], vn[NELN];
             for (int j=0; j<el.Nodes(); ++j) {
                 rt[j] = mesh.Node(el.m_node[j]).m_rt;
-                st[j] = mesh.Node(el.m_node[j]).m_st();
+                st[j] = mesh.Node(el.m_node[j]).st();
                 vt[j] = mesh.Node(el.m_node[j]).get_vec3d(dof_VX, dof_VY, dof_VZ);
                 wt[j] = mesh.Node(el.m_node[j]).get_vec3d(dof_SVX, dof_SVY, dof_SVZ);
             }
@@ -1794,10 +2343,23 @@ bool FEPlotRelativeVolume::Save(FEDomain &dom, FEDataStream& a)
 	return true;
 }
 
-//-----------------------------------------------------------------------------
+bool FEPlotSPRRelativeVolume::Save(FEDomain& dom, FEDataStream& a)
+{
+	if (dom.Class() == FE_DOMAIN_SOLID)
+	{
+		FESolidDomain& solidDomain = dynamic_cast<FESolidDomain&>(dom);
+		writeSPRElementValue(solidDomain, a, [](const FEMaterialPoint& mp) {
+				const FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+				return (pt ? pt->m_J : 0.0);
+			});
+		return true;
+	}
+	return false;
+}
+
 bool FEPlotShellRelativeVolume::Save(FEDomain& dom, FEDataStream& a)
 {
-	FEShellDomain* sd = dynamic_cast<FEShellDomain*>(&dom); assert(sd);
+	FEShellDomain* sd = dynamic_cast<FEShellDomain*>(&dom);
 	if (sd == nullptr) return false;
 
 	// a filter to get J from a strain tensor
@@ -1843,16 +2405,15 @@ bool FEPlotFiberStretch::Save(FEDomain &dom, FEDataStream& a)
 		if (pme == nullptr) return false;
 	}
 
-	ParamString ps("fiber");
-	FEParam* pp = pme->FindParameter(ps);
-	if (pp == 0) return false;
-	FEParamVec3& vec = pp->value<FEParamVec3>();
+	// get the fiber property
+	FEVec3dValuator* vec = dynamic_cast<FEVec3dValuator*>(pme->GetProperty("fiber"));
+	if (vec == 0) return false;
 
 	if (dom.Class() != FE_DOMAIN_SOLID) return false;
 	writeAverageElementValue<double>(dom, a, [&](const FEMaterialPoint& mp) -> double { 
 		const FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
 		mat3d Q = pme->GetLocalCS(mp);
-		vec3d a0 = vec(mp); a0.unit();
+		vec3d a0 = vec->unitVector(mp);
 		vec3d ar = Q * a0;
 		mat3d F = ep.m_F;
 		vec3d a = F*ar;
@@ -1866,7 +2427,7 @@ bool FEPlotFiberStretch::Save(FEDomain &dom, FEDataStream& a)
 class FEFiberVector
 {
 public:
-	FEFiberVector(FEMaterial* pm, FEParamVec3& vec) : m_pm(pm), m_vec(vec) {}
+	FEFiberVector(FEMaterial* pm, FEVec3dValuator& vec) : m_pm(pm), m_vec(vec) {}
 	vec3d operator()(const FEMaterialPoint& mp)
 	{
 		const FEElasticMaterialPoint* pt = mp.ExtractData<const FEElasticMaterialPoint>();
@@ -1874,7 +2435,7 @@ public:
 		{
 			mat3d Q = m_pm->GetLocalCS(mp);
 			mat3d F = pt->m_F;
-			vec3d a0 = m_vec(mp); a0.unit();
+			vec3d a0 = m_vec.unitVector(mp);
 			vec3d ar = Q * a0;
 			vec3d a = F * ar; a.unit();
 			return a;
@@ -1884,7 +2445,7 @@ public:
 	}
 private:
 	FEMaterial*		m_pm;
-	FEParamVec3&	m_vec;
+	FEVec3dValuator&	m_vec;
 };
 
 
@@ -1909,12 +2470,11 @@ bool FEPlotFiberVector::Save(FEDomain &dom, FEDataStream& a)
 		if (pme == nullptr) return false;
 	}
 
-	ParamString ps("fiber");
-	FEParam* pp = pme->FindParameter(ps);
-	if (pp == 0) return false;
-	FEParamVec3& vec = pp->value<FEParamVec3>();
+	// get the fiber property
+	FEVec3dValuator* vec = dynamic_cast<FEVec3dValuator*>(pme->GetProperty("fiber"));
+	if (vec == 0) return false;
 
-	writeAverageElementValue<vec3d, vec3d>(dom, a, FEFiberVector(pme, vec), [](const vec3d& r) -> vec3d { vec3d n(r); n.unit(); return n; });
+	writeAverageElementValue<vec3d, vec3d>(dom, a, FEFiberVector(pme, *vec), [](const vec3d& r) -> vec3d { vec3d n(r); n.unit(); return n; });
 
 	return true;
 }
@@ -2164,6 +2724,94 @@ bool FEPlotSPRLagrangeStrain::Save(FEDomain& dom, FEDataStream& a)
 	return true;
 }
 
+bool FEPlotSPRInfStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+	// For now, this is only available for solid domains
+	if (dom.Class() != FE_DOMAIN_SOLID) return false;
+	FESolidDomain& sd = static_cast<FESolidDomain&>(dom);
+	writeSPRElementValueMat3ds(sd, a, [](const FEMaterialPoint& mp) {
+		const FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
+
+		// displacement tensor
+		mat3d U = pt.m_F - mat3dd(1.0);
+
+		// evaluate small strain tensor eij = 0.5*(Uij + Uji)
+		mat3ds e = U.sym();
+
+		return e;
+	});
+	return true;
+}
+
+//=============================================================================
+//! Store the average Almansi tensor
+class FEAlmansiStrain
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pt == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        
+        return pt->AlmansiStrain();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotAlmansiStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FEAlmansiStrain());
+    return true;
+}
+
+//=============================================================================
+//! Store the average right Cauchy Green tensor
+class FERightCauchyGreen
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pt == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        
+        return pt->RightCauchyGreen();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotRightCauchyGreen::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FERightCauchyGreen());
+    return true;
+}
+
+//=============================================================================
+//! Store the average left Cauchy Green tensor
+class FELeftCauchyGreen
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pt == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        
+        return pt->LeftCauchyGreen();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotLeftCauchyGreen::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FELeftCauchyGreen());
+    return true;
+}
+
 //=============================================================================
 //! Store the average right stretch
 class FERightStretch
@@ -2305,9 +2953,6 @@ bool FEPlotShellDirector::Save(FEDomain &dom, FEDataStream &a)
     const int dof_X = GetFEModel()->GetDOFIndex("x");
     const int dof_Y = GetFEModel()->GetDOFIndex("y");
     const int dof_Z = GetFEModel()->GetDOFIndex("z");
-	const int dof_U = GetFEModel()->GetDOFIndex("u");
-	const int dof_V = GetFEModel()->GetDOFIndex("v");
-	const int dof_W = GetFEModel()->GetDOFIndex("w");
     const int dof_SX = GetFEModel()->GetDOFIndex("sx");
     const int dof_SY = GetFEModel()->GetDOFIndex("sy");
     const int dof_SZ = GetFEModel()->GetDOFIndex("sz");
@@ -2325,7 +2970,7 @@ bool FEPlotShellDirector::Save(FEDomain &dom, FEDataStream &a)
 				for (int j = 0; j<n; ++j)
 				{
 					FENode& nj = mesh.Node(e.m_node[j]);
-					vec3d D = e.m_D0[j] + nj.get_vec3d(dof_U, dof_V, dof_W);
+					vec3d D = e.m_D0[j] + nj.get_vec3d(dof_SX, dof_SY, dof_SZ);
 					a << D;
 				}
 			}
@@ -2360,675 +3005,354 @@ bool FEPlotShellDirector::Save(FEDomain &dom, FEDataStream &a)
 	return false;
 }
 
+//=============================================================================
+FEPlotDamage::FEPlotDamage(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_comp = -1;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotDamage::SetFilter(const char* szfilter)
+{
+    int nread = sscanf(szfilter, "solid[%d]", &m_comp);
+	return (nread == 1);
+}
+
 //-----------------------------------------------------------------------------
 bool FEPlotDamage::Save(FEDomain &dom, FEDataStream& a)
 {
-	int N = dom.Elements();
-	FESolidMaterial* pmat = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
-	if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-	{
-		int NC = pmat->Properties();
-		for (int i=0; i<N; ++i)
-		{
-			FEElement& el = dom.ElementRef(i);
-
-			float D = 0.f;
-			int nint = el.GaussPoints();
-			for (int j=0; j<nint; ++j)
-			{
-				FEElasticMixtureMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEElasticMixtureMaterialPoint>();
-				for (int k=0; k<NC; ++k)
+    if (m_comp == -1) {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& pt) {
+			const FEReactiveMaterialPoint* ppd = pt.ExtractData<FEReactiveMaterialPoint>();
+			FEElasticMixtureMaterialPoint* pem = const_cast<FEElasticMixtureMaterialPoint*>(pt.ExtractData<FEElasticMixtureMaterialPoint>());
+			FEMultigenerationMaterialPoint* pmg = const_cast<FEMultigenerationMaterialPoint*>(pt.ExtractData<FEMultigenerationMaterialPoint>());
+			double D = 0.0;
+			if (ppd) D += (float)ppd->BrokenBonds();
+			else if (pem) {
+				for (int k = 0; k < pem->Components(); ++k)
 				{
-					FEDamageMaterialPoint* ppd = pt.GetPointData(k)->ExtractData<FEDamageMaterialPoint>();
-                    FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(k)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-					if (ppd) D += (float) ppd->m_D;
-                    else if (ppr) D += (float) ppr->m_D;
-                    else if (pve) {
-                        FEDamageMaterialPoint* pd = pve->GetPointData(0)->ExtractData<FEDamageMaterialPoint>();
-                        FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                        if (pd) D += (float) pd->m_D;
-                        else if (pr) D += (float) pr->m_D;
-                    }
+					const FEReactiveMaterialPoint* ppd = pem->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+					if (ppd) D += (float)ppd->BrokenBonds();
 				}
 			}
-			D /= (float) nint;
-			a.push_back(D);
-		}
-	}
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMultigenerationMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEMultigenerationMaterialPoint>();
-                for (int k=0; k<NC; ++k)
-                {
-                    FEDamageMaterialPoint* ppd = pt.GetPointData(k)->ExtractData<FEDamageMaterialPoint>();
-                    FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(k)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                    FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                    if (ppd) D += (float) ppd->m_D;
-                    else if (ppr) D += (float) ppr->m_D;
-                    else if (pve) {
-                        FEDamageMaterialPoint* pd = pve->GetPointData(0)->ExtractData<FEDamageMaterialPoint>();
-                        FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                        if (pd) D += (float) pd->m_D;
-                        else if (pr) D += (float) pr->m_D;
-                    }
-                    else if (pem)
-                    {
-                        int NE = (int)pem->m_w.size();
-                        for (int l=0; l<NE; ++l)
-                        {
-                            FEDamageMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEDamageMaterialPoint>();
-                            FEReactiveFatigueMaterialPoint* ppr = pem->GetPointData(l)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                            FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                            if (ppd) D += (float) ppd->m_D;
-                            else if (ppr) D += (float) ppr->m_D;
-                            else if (pve) {
-                                FEDamageMaterialPoint* pd = pve->GetPointData(0)->ExtractData<FEDamageMaterialPoint>();
-                                FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                                if (pd) D += (float) pd->m_D;
-                                else if (pr) D += (float) pr->m_D;
-                            }
-                        }
-                    }
-                }
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
-	else
-	{
-		for (int i=0; i<N; ++i)
-		{
-			FEElement& el = dom.ElementRef(i);
-
-			float D = 0.f;
-			int nint = el.GaussPoints();
-			for (int j=0; j<nint; ++j)
-			{
-				FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-				FEDamageMaterialPoint* ppd = pt.ExtractData<FEDamageMaterialPoint>();
-                FEReactiveFatigueMaterialPoint* ppr = pt.ExtractData<FEReactiveFatigueMaterialPoint>();
-                FEReactivePlasticDamageMaterialPoint* prd = pt.ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                FEReactiveViscoelasticMaterialPoint* pve = pt.ExtractData<FEReactiveViscoelasticMaterialPoint>();
-				if (ppd) D += (float) ppd->m_D;
-                else if (ppr) D += (float) ppr->m_D;
-                else if (prd) D += (float) prd->m_D;
-                else if (pve) {
-                    FEDamageMaterialPoint* pd = pve->GetPointData(0)->ExtractData<FEDamageMaterialPoint>();
-                    FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    if (pd) D += (float) pd->m_D;
-                    else if (pr) D += (float) pr->m_D;
-                }
-			}
-			D /= (float) nint;
-			a.push_back(D);
-		}
-	}
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Resolve nested damage material by number
-bool FEPlotNestedDamage::SetFilter(int nmat)
-{
-    m_nmat = nmat-1;
-    return (m_nmat != -1);
-}
-
-//-----------------------------------------------------------------------------
-bool FEPlotNestedDamage::Save(FEDomain &dom, FEDataStream& a)
-{
-    FESolidMaterial* pmat = dom.GetMaterial()->ExtractProperty<FESolidMaterial>();
-    if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-    {
-        int NC = pmat->Properties();
-        if ((m_nmat > -1) && (m_nmat < NC))
-        {
-			writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
-				FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
-				FEElasticMixtureMaterialPoint& pt = *mp_noconst.ExtractData<FEElasticMixtureMaterialPoint>();
-				FEDamageMaterialPoint* ppd = pt.GetPointData(m_nmat)->ExtractData<FEDamageMaterialPoint>();
-                FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(m_nmat)->ExtractData<FEReactiveFatigueMaterialPoint>();
-				double D = 0.0;
-				if (ppd) D += (float)ppd->m_D;
-                else if (ppr) D += (float)ppr->m_D;
-				return D;
-			});
-        }
-    }
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        if ((m_nmat > -1) && (m_nmat < NC))
-        {
-			writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
-				FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
-				FEMultigenerationMaterialPoint& pt = *mp_noconst.ExtractData<FEMultigenerationMaterialPoint>();
-				FEDamageMaterialPoint* ppd = pt.GetPointData(m_nmat)->ExtractData<FEDamageMaterialPoint>();
-                FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(m_nmat)->ExtractData<FEReactiveFatigueMaterialPoint>();
-				FEElasticMixtureMaterialPoint* pem = pt.GetPointData(m_nmat)->ExtractData<FEElasticMixtureMaterialPoint>();
-
-				double D = 0.0;
-				if (ppd) D += (float)ppd->m_D;
-                else if (ppr) D += (float)ppr->m_D;
-				else if (pem)
+			else if (pmg) {
+				for (int k = 0; k < pmg->Components(); ++k)
 				{
-					int NE = (int)pem->m_w.size();
-					for (int l = 0; l<NE; ++l)
+					FEReactiveMaterialPoint* ppd = pmg->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+					FEElasticMixtureMaterialPoint* pem = pmg->GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
+					if (ppd) D += (float)ppd->BrokenBonds();
+					else if (pem)
 					{
-						FEDamageMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEDamageMaterialPoint>();
-                        FEReactiveFatigueMaterialPoint* ppr = pem->GetPointData(l)->ExtractData<FEReactiveFatigueMaterialPoint>();
-						if (ppd) D += (float)ppd->m_D;
-                        else if (ppr) D += (float)ppr->m_D;
+						for (int l = 0; l < pem->Components(); ++l)
+						{
+							FEReactiveMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEReactiveMaterialPoint>();
+							if (ppd) D += (float)ppd->BrokenBonds();
+						}
 					}
 				}
+			}
+            return D;
+        });
+        return true;
+    }
+    else {
+        for (int i = 0; i < dom.Elements(); ++i)
+        {
+            FEElement& el = dom.ElementRef(i);
 
-				return D;
-			});
+            double D = 0.0;
+            for (int n = 0; n < el.GaussPoints(); ++n)
+            {
+                FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+                FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+                if (mmp && (m_comp < mmp->Components()))
+                {
+                    FEReactiveMaterialPoint* dp = mmp->GetPointData(m_comp)->ExtractData<FEReactiveMaterialPoint>();
+                    if (dp) D += dp->BrokenBonds();
+                }
+            }
+            D /= (float)el.GaussPoints();
+
+            a << D;
         }
+        return true;
     }
-    else
-    {
-		writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
-			const FEDamageMaterialPoint* ppd = mp.ExtractData<FEDamageMaterialPoint>();
-            const FEReactiveFatigueMaterialPoint* ppr = mp.ExtractData<FEReactiveFatigueMaterialPoint>();
-			double D = 0.0;
-			if (ppd) D += (float)ppd->m_D;
-            else if (ppr) D += (float)ppr->m_D;
-			return D;
-		});
-    }
+}
+
+//=============================================================================
+FEPlotIntactBondFraction::FEPlotIntactBondFraction(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_comp = -1;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotIntactBondFraction::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
     return true;
 }
 
 //-----------------------------------------------------------------------------
 bool FEPlotIntactBondFraction::Save(FEDomain &dom, FEDataStream& a)
 {
-    int N = dom.Elements();
-    FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
-    if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-    {
-        int NC = pmat->Properties();
-        for (int i=0; i<N; ++i)
+    if (m_comp == -1) {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& pt) {
+			FEMaterialPoint& mp = const_cast<FEMaterialPoint&>(pt);
+            double D = 0.0;
+            FEReactiveMaterialPoint* prm = mp.ExtractData<FEReactiveMaterialPoint>();
+            FEReactiveViscoelasticMaterialPoint* pve = mp.ExtractData<FEReactiveViscoelasticMaterialPoint>();
+            if (prm) D = (float) prm->IntactBonds();
+            else if (pve) {
+                const FEReactiveMaterialPoint* pr = pve->GetPointData(0)->ExtractData< FEReactiveMaterialPoint>();
+                if (pr) D = (float) pr->IntactBonds();
+            }
+            return D;
+        });
+        return true;
+    }
+    else {
+        for (int i = 0; i < dom.Elements(); ++i)
         {
             FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
+
+            float D = 0.0;
+            for (int n = 0; n < el.GaussPoints(); ++n)
             {
-                FEElasticMixtureMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEElasticMixtureMaterialPoint>();
-                for (int k=0; k<NC; ++k)
+                FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+                FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+                if (mmp && (m_comp < mmp->Components()))
                 {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEReactivePlasticDamageMaterialPoint* prd = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                    FEDamageMaterialPoint* ppd = pt.GetPointData(k)->ExtractData<FEDamageMaterialPoint>();
-                    FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(k)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                    if (prp) D += (float) (1.0 - prp->YieldedBonds());
-                    else if (prd) D += (float) prd->IntactBonds();
-                    else if (ppd) D += (float) (1.0 - ppd->m_D);
-                    else if (ppr) D += (float) ppr->m_wit;
+                    FEReactiveMaterialPoint* prm = mmp->GetPointData(m_comp)->ExtractData<FEReactiveMaterialPoint>();
+                    FEReactiveViscoelasticMaterialPoint* pve = mmp->GetPointData(m_comp)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
+                    if (prm) D += (float) prm->IntactBonds();
                     else if (pve) {
-                        FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                        if (pr) D += (float) pr->m_wit;
+                        FEReactiveMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveMaterialPoint>();
+                        if (pr) D += (float) pr->IntactBonds();
                     }
                 }
             }
-            D /= (float) nint;
-            a.push_back(D);
+            D /= (float)el.GaussPoints();
+
+            a << D;
         }
+        return true;
     }
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMultigenerationMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEMultigenerationMaterialPoint>();
-                for (int k=0; k<NC; ++k)
-                {
-                    FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(k)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEReactivePlasticDamageMaterialPoint* prd = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                    FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                    FEDamageMaterialPoint* ppd = pt.GetPointData(k)->ExtractData<FEDamageMaterialPoint>();
-                    FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                    if (prp) D += (float) (1 - prp->YieldedBonds());
-                    else if (prd) D += (float) prd->IntactBonds();
-                    else if (ppd) D += (float) (1 - ppd->m_D);
-                    else if (ppr) D += (float) ppr->m_wit;
-                    else if (pve) {
-                        FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                        if (pr) D += (float) pr->m_wit;
-                    }
-                    else if (pem)
-                    {
-                        int NE = (int)pem->m_w.size();
-                        for (int l=0; l<NE; ++l)
-                        {
-                            FEReactiveFatigueMaterialPoint* ppr = pem->GetPointData(l)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                            FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                            FEReactivePlasticDamageMaterialPoint* prd = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                            FEDamageMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEDamageMaterialPoint>();
-                            FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                            if (prp) D += (float) (1-prp->YieldedBonds());
-                            else if (prd) D += (float) prd->IntactBonds();
-                            else if (ppd) D += (float) (1 - ppd->m_D);
-                            else if (ppr) D += (float) ppr->m_wit;
-                            else if (pve) {
-                                FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                                if (pr) D += (float) pr->m_wit;
-                            }
-                        }
-                    }
-                }
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
-    else
-    {
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-                FEReactiveFatigueMaterialPoint* ppr = pt.ExtractData<FEReactiveFatigueMaterialPoint>();
-                FEReactivePlasticityMaterialPoint* prp = pt.ExtractData<FEReactivePlasticityMaterialPoint>();
-                FEReactivePlasticDamageMaterialPoint* prd = pt.ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                FEDamageMaterialPoint* ppd = pt.ExtractData<FEDamageMaterialPoint>();
-                FEReactiveViscoelasticMaterialPoint* pve = pt.ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                if (prp) D += (float) (1-prp->YieldedBonds());
-                else if (prd) D += (float) prd->IntactBonds();
-                else if (ppd) D += (float) (1 - ppd->m_D);
-                else if (ppr) D += (float) ppr->m_wit;
-                else if (pve) {
-                    FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    if (pr) D += (float) pr->m_wit;
-                }
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
+}
+
+//=============================================================================
+FEPlotFatigueBondFraction::FEPlotFatigueBondFraction(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_comp = -1;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotFatigueBondFraction::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
     return true;
 }
 
 //-----------------------------------------------------------------------------
 bool FEPlotFatigueBondFraction::Save(FEDomain &dom, FEDataStream& a)
 {
-    int N = dom.Elements();
-    FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
-    if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-    {
-        int NC = pmat->Properties();
-        for (int i=0; i<N; ++i)
+    if (m_comp == -1) {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& pt) {
+			FEMaterialPoint& mp = const_cast<FEMaterialPoint&>(pt);
+            float wf = 0.0;
+            FEReactiveMaterialPoint* prm = mp.ExtractData<FEReactiveMaterialPoint>();
+            FEReactiveViscoelasticMaterialPoint* pve = mp.ExtractData<FEReactiveViscoelasticMaterialPoint>();
+            if (prm) wf = (float) prm->FatigueBonds();
+            else if (pve) {
+                FEReactiveMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveMaterialPoint>();
+                if (pr) wf = (float) pr->FatigueBonds();
+            }
+            return wf;
+        });
+        return true;
+    }
+    else {
+        for (int i = 0; i < dom.Elements(); ++i)
         {
             FEElement& el = dom.ElementRef(i);
-            
-            float wf = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
+
+            float wf = 0.0;
+            for (int n = 0; n < el.GaussPoints(); ++n)
             {
-                FEElasticMixtureMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEElasticMixtureMaterialPoint>();
-                for (int k=0; k<NC; ++k)
+                FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+                FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+                if (mmp && (m_comp < mmp->Components()))
                 {
-                    FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(k)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                    if (ppr) wf += (float) ppr->m_wft;
+                    FEReactiveMaterialPoint* ppr = mmp->GetPointData(m_comp)->ExtractData<FEReactiveMaterialPoint>();
+                    FEReactiveViscoelasticMaterialPoint* pve = mmp->GetPointData(m_comp)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
+                    if (ppr) wf += (float) ppr->FatigueBonds();
                     else if (pve) {
-                        FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                        if (pr) wf += (float) pr->m_wft;
+                        FEReactiveMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveMaterialPoint>();
+                        if (pr) wf += (float) pr->FatigueBonds();
                     }
                 }
             }
-            wf /= (float) nint;
-            a.push_back(wf);
+            wf /= (float)el.GaussPoints();
+
+            a << wf;
         }
+        return true;
     }
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float wf = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMultigenerationMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEMultigenerationMaterialPoint>();
-                for (int k=0; k<NC; ++k)
-                {
-                    FEReactiveFatigueMaterialPoint* ppr = pt.GetPointData(k)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                    FEReactiveViscoelasticMaterialPoint* pve = pt.GetPointData(k)->ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                    if (ppr) wf += (float) ppr->m_wft;
-                    else if (pve) {
-                        FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                        if (pr) wf += (float) pr->m_wft;
-                    }
-                    else if (pem)
-                    {
-                        int NE = (int)pem->m_w.size();
-                        for (int l=0; l<NE; ++l)
-                        {
-                            FEReactiveFatigueMaterialPoint* ppr = pem->GetPointData(l)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                            if (ppr) wf += (float) ppr->m_wft;
-                        }
-                    }
-                }
-            }
-            wf /= (float) nint;
-            a.push_back(wf);
-        }
-    }
-    else
-    {
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float wf = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-                FEReactiveFatigueMaterialPoint* ppr = pt.ExtractData<FEReactiveFatigueMaterialPoint>();
-                FEReactiveViscoelasticMaterialPoint* pve = pt.ExtractData<FEReactiveViscoelasticMaterialPoint>();
-                if (ppr) wf += (float) ppr->m_wft;
-                else if (pve) {
-                    FEReactiveFatigueMaterialPoint* pr = pve->GetPointData(0)->ExtractData<FEReactiveFatigueMaterialPoint>();
-                    if (pr) wf += (float) pr->m_wft;
-                }
-            }
-            wf /= (float) nint;
-            a.push_back(wf);
-        }
-    }
+}
+
+//=============================================================================
+FEPlotYieldedBondFraction::FEPlotYieldedBondFraction(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_comp = -1;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotYieldedBondFraction::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
     return true;
 }
 
 //-----------------------------------------------------------------------------
 bool FEPlotYieldedBondFraction::Save(FEDomain &dom, FEDataStream& a)
 {
-    int N = dom.Elements();
-    FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
-    if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-    {
-        int NC = pmat->Properties();
-        for (int i=0; i<N; ++i)
+    if (m_comp == -1) {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
+            float wy = 0.0;
+            const FEReactiveMaterialPoint* prp = mp.ExtractData<FEReactiveMaterialPoint>();
+            if (prp) wy = (float) prp->YieldedBonds();
+            return wy;
+        });
+        return true;
+    }
+    else {
+        for (int i = 0; i < dom.Elements(); ++i)
         {
             FEElement& el = dom.ElementRef(i);
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
+
+            float wy = 0.0;
+            for (int n = 0; n < el.GaussPoints(); ++n)
             {
-                FEElasticMixtureMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEElasticMixtureMaterialPoint>();
-                for (int k=0; k<NC; ++k)
+                FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+                FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+                if (mmp && (m_comp < mmp->Components()))
                 {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEReactivePlasticDamageMaterialPoint* ppp = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                    if (prp) D += (float) prp->YieldedBonds();
-                    else if (ppp) D += (float) ppp->YieldedBonds();
+                    const FEReactiveMaterialPoint* prp = mmp->GetPointData(m_comp)->ExtractData<FEReactiveMaterialPoint>();
+                    if (prp) wy += (float) prp->YieldedBonds();
                 }
             }
-            D /= (float) nint;
-            a.push_back(D);
+            wy /= (float)el.GaussPoints();
+
+            a << wy;
         }
+        return true;
     }
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMultigenerationMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEMultigenerationMaterialPoint>();
-                for (int k=0; k<NC; ++k)
-                {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEReactivePlasticDamageMaterialPoint* ppp = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                    FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                    if (prp) D += (float) prp->YieldedBonds();
-                    else if (ppp) D += (float) ppp->YieldedBonds();
-                    else if (pem)
-                    {
-                        int NE = (int)pem->m_w.size();
-                        for (int l=0; l<NE; ++l)
-                        {
-                            FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                            FEReactivePlasticDamageMaterialPoint* ppp = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                            if (prp) D += (float) prp->YieldedBonds();
-                            else if (ppp) D += (float) ppp->YieldedBonds();
-                        }
-                    }
-                }
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
-    else
-    {
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-                FEReactivePlasticityMaterialPoint* prp = pt.ExtractData<FEReactivePlasticityMaterialPoint>();
-                FEReactivePlasticDamageMaterialPoint* ppp = pt.ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                if (prp) D += (float) prp->YieldedBonds();
-                else if (ppp) D += (float) ppp->YieldedBonds();
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
+}
+
+//=============================================================================
+FEPlotReactivePlasticityHeatSupply::FEPlotReactivePlasticityHeatSupply(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_comp = -1;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotReactivePlasticityHeatSupply::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
     return true;
 }
 
 //-----------------------------------------------------------------------------
 bool FEPlotReactivePlasticityHeatSupply::Save(FEDomain &dom, FEDataStream& a)
 {
-    int N = dom.Elements();
-    FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
-    if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-    {
-        int NC = pmat->Properties();
-        for (int i=0; i<N; ++i)
+    if (m_comp == -1) {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
+            float Rhat = 0.0;
+            const FEReactivePlasticityMaterialPoint* prp = mp.ExtractData<FEReactivePlasticityMaterialPoint>();
+            const FEReactivePlasticDamageMaterialPoint* ppp = mp.ExtractData<FEReactivePlasticDamageMaterialPoint>();
+            if (prp) Rhat = (float) prp->m_Rhat;
+            else if (ppp) Rhat = (float) ppp->m_Rhat;
+            return Rhat;
+        });
+        return true;
+    }
+    else {
+        for (int i = 0; i < dom.Elements(); ++i)
         {
             FEElement& el = dom.ElementRef(i);
-            
-            float R = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
+
+            float Rhat = 0.0;
+            for (int n = 0; n < el.GaussPoints(); ++n)
             {
-                FEElasticMixtureMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEElasticMixtureMaterialPoint>();
-                for (int k=0; k<NC; ++k)
+                FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+                FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+                if (mmp && (m_comp < mmp->Components()))
                 {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    if (prp) R += (float) prp->m_Rhat;
+                    const FEReactivePlasticityMaterialPoint* prp = mmp->GetPointData(m_comp)->ExtractData<FEReactivePlasticityMaterialPoint>();
+                    const FEReactivePlasticDamageMaterialPoint* ppp = mmp->GetPointData(m_comp)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
+                    if (prp) Rhat += (float) prp->m_Rhat;
+                    else if (ppp) Rhat += (float) ppp->m_Rhat;
                 }
             }
-            R /= (float) nint;
-            a.push_back(R);
+            Rhat /= (float)el.GaussPoints();
+
+            a << Rhat;
         }
+        return true;
     }
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float R = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMultigenerationMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEMultigenerationMaterialPoint>();
-                for (int k=0; k<NC; ++k)
-                {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                    if (prp) R += (float) prp->m_Rhat;
-                    else if (pem)
-                    {
-                        int NE = (int)pem->m_w.size();
-                        for (int l=0; l<NE; ++l)
-                        {
-                            FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                            if (prp) R += (float) prp->m_Rhat;
-                        }
-                    }
-                }
-            }
-            R /= (float) nint;
-            a.push_back(R);
-        }
-    }
-    else
-    {
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float R = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-                FEReactivePlasticityMaterialPoint* prp = pt.ExtractData<FEReactivePlasticityMaterialPoint>();
-                if (prp) R += (float) prp->m_Rhat;
-            }
-            R /= (float) nint;
-            a.push_back(R);
-        }
-    }
+}
+
+
+//=============================================================================
+FEPlotOctahedralPlasticStrain::FEPlotOctahedralPlasticStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM)
+{
+    m_comp = -1;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotOctahedralPlasticStrain::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
     return true;
 }
 
 //-----------------------------------------------------------------------------
 bool FEPlotOctahedralPlasticStrain::Save(FEDomain &dom, FEDataStream& a)
 {
-    int N = dom.Elements();
-    FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
-    if (dynamic_cast<FEElasticMixture*>(pmat)||dynamic_cast<FEUncoupledElasticMixture*>(pmat))
-    {
-        int NC = pmat->Properties();
-        for (int i=0; i<N; ++i)
+    if (m_comp == -1) {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
+            float gp = 0.0;
+            const FEReactivePlasticityMaterialPoint* prp = mp.ExtractData<FEReactivePlasticityMaterialPoint>();
+            const FEReactivePlasticDamageMaterialPoint* ppp = mp.ExtractData<FEReactivePlasticDamageMaterialPoint>();
+            if (prp && prp->m_gp.size()) gp = (float) prp->m_gp[0];
+            else if (ppp && ppp->m_gp.size()) gp = (float) ppp->m_gp[0];
+            return gp;
+        });
+        return true;
+    }
+    else {
+        for (int i = 0; i < dom.Elements(); ++i)
         {
             FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
+
+            float gp = 0.0;
+            for (int n = 0; n < el.GaussPoints(); ++n)
             {
-                FEElasticMixtureMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEElasticMixtureMaterialPoint>();
-                for (int k=0; k<NC; ++k)
+                FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+                FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+                if (mmp && (m_comp < mmp->Components()))
                 {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEReactivePlasticDamageMaterialPoint* prd = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                    if (prp) D += (float) prp->m_gp[0];
-                    else if (prd) D += (float) prd->m_gp[0];
+                    const FEReactivePlasticityMaterialPoint* prp = mmp->GetPointData(m_comp)->ExtractData<FEReactivePlasticityMaterialPoint>();
+                    const FEReactivePlasticDamageMaterialPoint* ppp = mmp->GetPointData(m_comp)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
+                    if (prp && prp->m_gp.size()) gp += (float) prp->m_gp[0];
+                    else if (ppp && ppp->m_gp.size()) gp += (float) ppp->m_gp[0];
                 }
             }
-            D /= (float) nint;
-            a.push_back(D);
+            gp /= (float)el.GaussPoints();
+
+            a << gp;
         }
+        return true;
     }
-    else if (dynamic_cast<FEElasticMultigeneration*>(pmat))
-    {
-        FEElasticMultigeneration* pmg = dynamic_cast<FEElasticMultigeneration*>(pmat);
-        int NC = pmg->Properties();
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMultigenerationMaterialPoint& pt = *el.GetMaterialPoint(j)->ExtractData<FEMultigenerationMaterialPoint>();
-                for (int k=0; k<NC; ++k)
-                {
-                    FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                    FEReactivePlasticDamageMaterialPoint* prd = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                    FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                    if (prp) D += (float) prp->m_gp[0];
-                    else if (prd) D += (float) prd->m_gp[0];
-                    else if (pem)
-                    {
-                        int NE = (int)pem->m_w.size();
-                        for (int l=0; l<NE; ++l)
-                        {
-                            FEReactivePlasticityMaterialPoint* prp = pt.GetPointData(k)->ExtractData<FEReactivePlasticityMaterialPoint>();
-                            FEReactivePlasticDamageMaterialPoint* prd = pt.GetPointData(k)->ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                            if (prp) D += (float) prp->m_gp[0];
-                            else if (prd) D += (float) prd->m_gp[0];
-                        }
-                    }
-                }
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
-    else
-    {
-        for (int i=0; i<N; ++i)
-        {
-            FEElement& el = dom.ElementRef(i);
-            
-            float D = 0.f;
-            int nint = el.GaussPoints();
-            for (int j=0; j<nint; ++j)
-            {
-                FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-                FEReactivePlasticityMaterialPoint* prp = pt.ExtractData<FEReactivePlasticityMaterialPoint>();
-                FEReactivePlasticDamageMaterialPoint* prd = pt.ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                if (prp) D += (float) prp->m_gp[0];
-                else if (prd) D += (float) prd->m_gp[0];
-            }
-            D /= (float) nint;
-            a.push_back(D);
-        }
-    }
-    return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -3353,10 +3677,8 @@ bool FEPlotFiberTargetStretch::Save(FEDomain& dom, FEDataStream& a)
 	if (pme == 0) return false;
 
 	// get the fiber property
-	ParamString ps("fiber");
-	FEParam* pp = pme->FindParameter(ps);
-	if (pp == 0) return false;
-	FEParamVec3& vec = pp->value<FEParamVec3>();
+	FEVec3dValuator* vec = dynamic_cast<FEVec3dValuator*>(pme->GetProperty("fiber"));
+	if (vec == 0) return false;
 
 	// we're good so store the in-situ stretch
 	int NE = dom.Elements();
@@ -3372,7 +3694,7 @@ bool FEPlotFiberTargetStretch::Save(FEDomain& dom, FEDataStream& a)
 
 			mat3d Fp = pp.initialPrestrain();
 			mat3d Q = mat->GetLocalCS(mp);
-			vec3d a0 = vec.unitVector(mp);
+			vec3d a0 = vec->unitVector(mp);
 			vec3d ar = Q * a0;
 			vec3d a = Fp*ar;
 			double lamp = a.norm();
@@ -3401,10 +3723,8 @@ bool FEPlotPreStrainStretch::Save(FEDomain& dom, FEDataStream& a)
 	if (pme== 0) return false;
 
 	// get the fiber property
-	ParamString ps("fiber");
-	FEParam* pp = pme->FindParameter(ps);
-	if (pp == 0) return false;
-	FEParamVec3& vec = pp->value<FEParamVec3>();
+	FEVec3dValuator* vec = dynamic_cast<FEVec3dValuator*>(pme->GetProperty("fiber"));
+	if (vec == 0) return false;
 
 	int NE = dom.Elements();
 	for (int i = 0; i<NE; ++i)
@@ -3423,7 +3743,7 @@ bool FEPlotPreStrainStretch::Save(FEDomain& dom, FEDataStream& a)
 			mat3d Ft = F*Fp;
 
 			mat3d Q = mat->GetLocalCS(mp);
-			vec3d a0 = vec.unitVector(mp);
+			vec3d a0 = vec->unitVector(mp);
 			vec3d ar = Q * a0;
 			vec3d a = Ft*ar;
 
@@ -3452,10 +3772,8 @@ bool FEPlotPreStrainStretchError::Save(FEDomain& dom, FEDataStream& a)
 	if (pme == 0) return false;
 
 	// get the fiber property
-	ParamString ps("fiber");
-	FEParam* pp = pme->FindParameter(ps);
-	if (pp == 0) return false;
-	FEParamVec3& vec = pp->value<FEParamVec3>();
+	FEVec3dValuator* vec = dynamic_cast<FEVec3dValuator*>(pme->GetProperty("fiber"));
+	if (vec == 0) return false;
 
 	int NE = dom.Elements();
 	for (int i = 0; i<NE; ++i)
@@ -3471,7 +3789,7 @@ bool FEPlotPreStrainStretchError::Save(FEDomain& dom, FEDataStream& a)
 
 			// initial fiber vector
 			mat3d Q = mat->GetLocalCS(mp);
-			vec3d a0 = vec.unitVector(mp);
+			vec3d a0 = vec->unitVector(mp);
 			vec3d ar = Q * a0;
 
 			// target stretch
@@ -3551,7 +3869,7 @@ bool FEPlotSPRPreStrainCorrection::Save(FEDomain& dom, FEDataStream& a)
 	}
 
 	// this array will store the results
-	FESPRProjection map;
+	FESPRProjection map(sd);
 	vector<double> val[9];
 
 	// loop over stress components
@@ -3572,7 +3890,7 @@ bool FEPlotSPRPreStrainCorrection::Save(FEDomain& dom, FEDataStream& a)
 		}
 
 		// project to nodes
-		map.Project(sd, ED, val[n]);
+		map.Project(ED, val[n]);
 	}
 
 	// copy results to archive
@@ -3621,7 +3939,7 @@ bool FEPlotPreStrainCompatibility::Save(FEDomain& dom, FEDataStream& a)
 	}
 
 	// this array will store the results
-	FESPRProjection map;
+	FESPRProjection map(sd);
 	vector<double> val[9];
 
 	// create a global-to-local node list
@@ -3656,7 +3974,7 @@ bool FEPlotPreStrainCompatibility::Save(FEDomain& dom, FEDataStream& a)
 		}
 
 		// project to nodes
-		map.Project(sd, ED, val[n]);
+		map.Project(ED, val[n]);
 	}
 
 	// STEP 2 - now we calculate the gradient of the nodal values at the integration points
@@ -3795,6 +4113,46 @@ bool FEPlotDiscreteElementPercentElongation::Save(FEDomain& dom, FEDataStream& a
 	return true;
 }
 
+bool FEPlotDiscreteElementDirection::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEDiscreteDomain* pdiscreteDomain = dynamic_cast<FEDiscreteDomain*>(&dom);
+	if (pdiscreteDomain == nullptr) return false;
+	FEDiscreteDomain& discreteDomain = *pdiscreteDomain;
+
+	FEMesh& mesh = *dom.GetMesh();
+	int NE = discreteDomain.Elements();
+	for (int i = 0; i < NE; ++i)
+	{
+		FEDiscreteElement& el = discreteDomain.Element(i);
+		vec3d ra = mesh.Node(el.m_node[0]).m_rt;
+		vec3d rb = mesh.Node(el.m_node[1]).m_rt;
+		vec3d e = (rb - ra); e.unit();
+		a << e;
+	}
+
+	return true;
+}
+
+bool FEPlotDiscreteElementLength::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEDiscreteDomain* pdiscreteDomain = dynamic_cast<FEDiscreteDomain*>(&dom);
+	if (pdiscreteDomain == nullptr) return false;
+	FEDiscreteDomain& discreteDomain = *pdiscreteDomain;
+
+	FEMesh& mesh = *dom.GetMesh();
+	int NE = discreteDomain.Elements();
+	for (int i = 0; i < NE; ++i)
+	{
+		FEDiscreteElement& el = discreteDomain.Element(i);
+		vec3d ra = mesh.Node(el.m_node[0]).m_rt;
+		vec3d rb = mesh.Node(el.m_node[1]).m_rt;
+		double L = (rb - ra).Length();
+		a << L;
+	}
+
+	return true;
+}
+
 bool FEPlotDiscreteElementForce::Save(FEDomain& dom, FEDataStream& a)
 {
 	FEDiscreteElasticDomain* pdiscreteDomain = dynamic_cast<FEDiscreteElasticDomain*>(&dom);
@@ -3807,10 +4165,11 @@ bool FEPlotDiscreteElementForce::Save(FEDomain& dom, FEDataStream& a)
 		FEDiscreteElement& el = discreteDomain.Element(i);
 
 		// get the (one) material point data
-		FEDiscreteElasticMaterialPoint& mp = dynamic_cast<FEDiscreteElasticMaterialPoint&>(*el.GetMaterialPoint(0));
+		FEMaterialPoint& mp = *el.GetMaterialPoint(0);
+		FEDiscreteElasticMaterialPoint& dmp = *mp.ExtractData<FEDiscreteElasticMaterialPoint>();
 
 		// write the force
-		a << mp.m_Ft;
+		a << dmp.m_Ft;
 	}
 
 	return true;
@@ -3828,13 +4187,14 @@ bool FEPlotDiscreteElementSignedForce::Save(FEDomain& dom, FEDataStream& a)
 		FEDiscreteElement& el = discreteDomain.Element(i);
 
 		// get the (one) material point data
-		FEDiscreteElasticMaterialPoint& mp = dynamic_cast<FEDiscreteElasticMaterialPoint&>(*el.GetMaterialPoint(0));
+		FEMaterialPoint& mp = *el.GetMaterialPoint(0);
+		FEDiscreteElasticMaterialPoint& dmp = *mp.ExtractData<FEDiscreteElasticMaterialPoint>();
 
 		vec3d ra1 = dom.Node(el.m_lnode[0]).m_rt;
 		vec3d rb1 = dom.Node(el.m_lnode[1]).m_rt;
 		vec3d e = rb1 - ra1; e.unit();
 
-		vec3d F = mp.m_Ft;
+		vec3d F = dmp.m_Ft;
 
 		double Fm = F * e;
 
@@ -3859,10 +4219,11 @@ bool FEPlotDiscreteElementStrainEnergy::Save(FEDomain& dom, FEDataStream& a)
 		FEDiscreteElement& el = discreteDomain.Element(i);
 
 		// get the (one) material point data
-		FEDiscreteElasticMaterialPoint& mp = dynamic_cast<FEDiscreteElasticMaterialPoint&>(*el.GetMaterialPoint(0));
+		FEMaterialPoint& mp = *el.GetMaterialPoint(0);
+		FEDiscreteElasticMaterialPoint& dmp = *mp.ExtractData<FEDiscreteElasticMaterialPoint>();
 
 		// write the strain energy
-		a << discreteMaterial->StrainEnergy(mp);
+		a << discreteMaterial->StrainEnergy(dmp);
 	}
 
 	return true;
@@ -3923,13 +4284,29 @@ bool FEPlotContinuousDamage_::Save(FEDomain& dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
+bool FEPlotRVEgenerations::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
+    return true;
+}
+
 bool FEPlotRVEgenerations::Save(FEDomain& dom, FEDataStream& a)
 {
     int N = dom.Elements();
     FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
     if (pmat == nullptr) return false;
-    FEReactiveViscoelasticMaterial* rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
-    FEUncoupledReactiveViscoelasticMaterial* rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    FEReactiveViscoelasticMaterial* rvmat = nullptr;
+    FEUncoupledReactiveViscoelasticMaterial* rumat = nullptr;
+    if (m_comp > -1) {
+        FEElasticMixture* pmm = dynamic_cast<FEElasticMixture*>(pmat);
+        FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+        if (pmm) rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmm->GetMaterial(m_comp));
+        if (pum) rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pum->GetMaterial(m_comp));
+    }
+    else {
+        rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
+        rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    }
     if (rvmat) {
         for (int iel=0; iel<N; ++iel)
         {
@@ -3938,7 +4315,7 @@ bool FEPlotRVEgenerations::Save(FEDomain& dom, FEDataStream& a)
             int nint = el.GaussPoints();
             double bmf = 0;
             for (int j=0; j<nint; ++j)
-                bmf += rvmat->RVEGenerations(*rvmat->GetBondMaterialPoint(*el.GetMaterialPoint(j)));
+                bmf += rvmat->RVEGenerations(*el.GetMaterialPoint(j));
             a << bmf/nint;
         }
     }
@@ -3950,56 +4327,41 @@ bool FEPlotRVEgenerations::Save(FEDomain& dom, FEDataStream& a)
             int nint = el.GaussPoints();
             double bmf = 0;
             for (int j=0; j<nint; ++j)
-                bmf += rumat->RVEGenerations(*rumat->GetBondMaterialPoint(*el.GetMaterialPoint(j)));
+                bmf += rumat->RVEGenerations(*el.GetMaterialPoint(j));
             a << bmf/nint;
         }
     }
     else {
-        int NC = pmat->Properties();
-        // check all elements
-        for (int iel=0; iel<N; ++iel)
-        {
-            FEElement& el = dom.ElementRef(iel);
-            
-            int n = 0;
-            double bmf = 0;
-            // check all properties
-            for (int ic=0; ic < NC; ++ic) {
-                FEReactiveViscoelasticMaterial* rvmat = pmat->GetProperty(ic)->ExtractProperty<FEReactiveViscoelasticMaterial>();
-                FEUncoupledReactiveViscoelasticMaterial* rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
-                if (rvmat) {
-                    int nint = el.GaussPoints();
-                    for (int j=0; j<nint; ++j)
-                    {
-                        bmf += rvmat->RVEGenerations(*rvmat->GetBondMaterialPoint(*el.GetMaterialPoint(j)->GetPointData(ic)));
-                        ++n;
-                    }
-                }
-                else if (rumat) {
-                    int nint = el.GaussPoints();
-                    for (int j=0; j<nint; ++j)
-                    {
-                        bmf += rumat->RVEGenerations(*rumat->GetBondMaterialPoint(*el.GetMaterialPoint(j)->GetPointData(ic)));
-                        ++n;
-                    }
-                }
-            }
-            if (n > 0) bmf /= n;
-            a << bmf;
-        }
+        return false;
     }
 
     return true;
 }
 
 //-----------------------------------------------------------------------------
+bool FEPlotRVEbonds::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
+    return true;
+}
+
 bool FEPlotRVEbonds::Save(FEDomain& dom, FEDataStream& a)
 {
     int N = dom.Elements();
     FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
     if (pmat == nullptr) return false;
-    FEReactiveViscoelasticMaterial* rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
-    FEUncoupledReactiveViscoelasticMaterial* rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    FEReactiveViscoelasticMaterial* rvmat = nullptr;
+    FEUncoupledReactiveViscoelasticMaterial* rumat = nullptr;
+    if (m_comp > -1) {
+        FEElasticMixture* pmm = dynamic_cast<FEElasticMixture*>(pmat);
+        FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+        if (pmm) rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmm->GetMaterial(m_comp));
+        if (pum) rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pum->GetMaterial(m_comp));
+    }
+    else {
+        rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
+        rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    }
     if (rvmat) {
         for (int iel=0; iel<N; ++iel)
         {
@@ -4025,51 +4387,99 @@ bool FEPlotRVEbonds::Save(FEDomain& dom, FEDataStream& a)
         }
     }
     else {
-        int NC = pmat->Properties();
-        // check all elements
-        for (int iel=0; iel<N; ++iel)
-        {
-            FEElement& el = dom.ElementRef(iel);
-            
-            int n = 0;
-            double bmf = 0;
-            // check all properties
-            for (int ic=0; ic < NC; ++ic) {
-                FEReactiveViscoelasticMaterial* rvmat = pmat->GetProperty(ic)->ExtractProperty<FEReactiveViscoelasticMaterial>();
-                FEUncoupledReactiveViscoelasticMaterial* rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
-                if (rvmat) {
-                    int nint = el.GaussPoints();
-                    for (int j=0; j<nint; ++j)
-                    {
-                        bmf += rvmat->ReformingBondMassFraction(*rvmat->GetBondMaterialPoint(*el.GetMaterialPoint(j)->GetPointData(ic)));
-                        ++n;
-                    }
-                }
-                else if (rumat) {
-                    int nint = el.GaussPoints();
-                    for (int j=0; j<nint; ++j)
-                    {
-                        bmf += rumat->ReformingBondMassFraction(*rumat->GetBondMaterialPoint(*el.GetMaterialPoint(j)->GetPointData(ic)));
-                        ++n;
-                    }
-                }
-            }
-            if (n > 0) bmf /= n;
-            a << bmf;
-        }
+        return false;
     }
 
     return true;
 }
 
 //-----------------------------------------------------------------------------
+bool FEPlotRVErecruitment::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
+    return true;
+}
+
+bool FEPlotRVErecruitment::Save(FEDomain& dom, FEDataStream& a)
+{
+    int N = dom.Elements();
+    FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+    if (pmat == nullptr) return false;
+    FEReactiveViscoelasticMaterial* rvmat = nullptr;
+    FEUncoupledReactiveViscoelasticMaterial* rumat = nullptr;
+    if (m_comp > -1) {
+        FEElasticMixture* pmm = dynamic_cast<FEElasticMixture*>(pmat);
+        FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+        if (pmm) rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmm->GetMaterial(m_comp));
+        if (pum) rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pum->GetMaterial(m_comp));
+    }
+    else {
+        rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
+        rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    }
+    if (rvmat) {
+        for (int iel=0; iel<N; ++iel)
+        {
+            FEElement& el = dom.ElementRef(iel);
+            
+            int nint = el.GaussPoints();
+            double bmf = 0;
+            for (int j=0; j<nint; ++j) {
+                FEMaterialPoint& mp = *rvmat->GetBondMaterialPoint(*el.GetMaterialPoint(j));
+                FEReactiveVEMaterialPoint& pt = *mp.ExtractData<FEReactiveVEMaterialPoint>();
+                if (!pt.m_wv.empty()) bmf += pt.m_wv.back();
+                else bmf += 1.0;
+            }
+            a << bmf/nint;
+        }
+    }
+    else if (rumat) {
+        for (int iel=0; iel<N; ++iel)
+        {
+            FEElement& el = dom.ElementRef(iel);
+            
+            int nint = el.GaussPoints();
+            double bmf = 0;
+            for (int j=0; j<nint; ++j) {
+                FEMaterialPoint& mp = *rvmat->GetBondMaterialPoint(*el.GetMaterialPoint(j));
+                FEReactiveVEMaterialPoint & pt = *mp.ExtractData<FEReactiveVEMaterialPoint>();
+                if (!pt.m_wv.empty()) bmf += pt.m_wv.back();
+                else bmf += 1.0;
+            }
+            a << bmf/nint;
+        }
+    }
+    else {
+        return false;
+    }
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotRVEstrain::SetFilter(const char* szfilter)
+{
+    sscanf(szfilter, "solid[%d]", &m_comp);
+    return true;
+}
+
 bool FEPlotRVEstrain::Save(FEDomain& dom, FEDataStream& a)
 {
     int N = dom.Elements();
     FEElasticMaterial* pmat = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
     if (pmat == nullptr) return false;
-    FEReactiveViscoelasticMaterial* rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
-    FEUncoupledReactiveViscoelasticMaterial* rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    FEReactiveViscoelasticMaterial* rvmat = nullptr;
+    FEUncoupledReactiveViscoelasticMaterial* rumat = nullptr;
+    if (m_comp > -1) {
+        FEElasticMixture* pmm = dynamic_cast<FEElasticMixture*>(pmat);
+        FEUncoupledElasticMixture* pum = dynamic_cast<FEUncoupledElasticMixture*>(pmat);
+        if (pmm) rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmm->GetMaterial(m_comp));
+        if (pum) rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pum->GetMaterial(m_comp));
+    }
+    else {
+        rvmat = dynamic_cast<FEReactiveViscoelasticMaterial*>(pmat);
+        rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
+    }
     if (rvmat) {
         for (int iel=0; iel<N; ++iel)
         {
@@ -4095,38 +4505,7 @@ bool FEPlotRVEstrain::Save(FEDomain& dom, FEDataStream& a)
         }
     }
     else {
-        int NC = pmat->Properties();
-        // check all elements
-        for (int iel=0; iel<N; ++iel)
-        {
-            FEElement& el = dom.ElementRef(iel);
-            
-            int n = 0;
-            double bmf = 0;
-            // check all properties
-            for (int ic=0; ic < NC; ++ic) {
-                FEReactiveViscoelasticMaterial* rvmat = pmat->GetProperty(ic)->ExtractProperty<FEReactiveViscoelasticMaterial>();
-                FEUncoupledReactiveViscoelasticMaterial* rumat = dynamic_cast<FEUncoupledReactiveViscoelasticMaterial*>(pmat);
-                if (rvmat) {
-                    int nint = el.GaussPoints();
-                    for (int j=0; j<nint; ++j)
-                    {
-                        bmf += rvmat->ScalarStrain(*rvmat->GetBondMaterialPoint(*el.GetMaterialPoint(j)->GetPointData(ic)));
-                        ++n;
-                    }
-                }
-                else if (rumat) {
-                    int nint = el.GaussPoints();
-                    for (int j=0; j<nint; ++j)
-                    {
-                        bmf += rumat->ScalarStrain(*rumat->GetBondMaterialPoint(*el.GetMaterialPoint(j)->GetPointData(ic)));
-                        ++n;
-                    }
-                }
-            }
-            if (n > 0) bmf /= n;
-            a << bmf;
-        }
+        return false;
     }
     
     return true;
@@ -4238,4 +4617,625 @@ bool FEPlotWeakBondDevSED::Save(FEDomain& dom, FEDataStream& a)
         return true;
     }
     return false;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotTrussStretch::Save(FEDomain& dom, FEDataStream& a)
+{
+	if (dynamic_cast<FELinearTrussDomain*>(&dom))
+	{
+		FELinearTrussDomain* td = dynamic_cast<FELinearTrussDomain*>(&dom);
+		for (int i = 0; i < td->Elements(); ++i)
+		{
+			FETrussElement& el = td->Element(i);
+
+			double lam = 0.0;
+			int nint = el.GaussPoints();
+			for (int n = 0; n < nint; ++n)
+			{
+				// get the material point
+				FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+				FETrussMaterialPoint& pt = *(mp.ExtractData<FETrussMaterialPoint>());
+				lam += pt.m_lam;
+			}
+			lam /= (double)nint;
+			a << lam;
+		}
+		return true;
+	}
+	else if (dynamic_cast<FEElasticTrussDomain*>(&dom))
+	{
+		FEElasticTrussDomain* td = dynamic_cast<FEElasticTrussDomain*>(&dom);
+		for (int i = 0; i < td->Elements(); ++i)
+		{
+			FETrussElement& el = td->Element(i);
+			a << el.m_lam;
+		}
+		return true;
+	}
+	return false;
+}
+
+//=============================================================================
+//! Store the average growth  Lagrangian strain
+class FEGrowthLagrangeStrain
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+        const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+        if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        mat3d Fg = kp->m_Fg;
+        
+        mat3d C = Fg.transpose()*Fg;
+        mat3ds E = ((C - mat3dd(1.0))*0.5).sym();
+        return E;
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthLagrangeStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEKinematicGrowth* pme = dom.GetMaterial()->ExtractProperty<FEKinematicGrowth>();
+    if (pme == nullptr) return false;
+    
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        writeAverageElementValue<mat3ds>(dom, a, [](const FEMaterialPoint& mp) {
+            const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+            if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+            const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+            if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+            mat3d Fg = kp->m_Fg;
+            FEElasticMaterialPoint pe2;
+            pe2.m_F = Fg;
+            
+            return pe2.Strain();
+        });
+    }
+    else if (dom.Class() == FE_DOMAIN_SHELL)
+    {
+        FEShellDomain* sd = dynamic_cast<FEShellDomain*>(&dom); assert(sd);
+        
+        FEElasticEASShellDomain* easd = dynamic_cast<FEElasticEASShellDomain*>(&dom);
+        FEElasticANSShellDomain* ansd = dynamic_cast<FEElasticANSShellDomain*>(&dom);
+        if (easd || ansd)
+        {
+            return false;
+        }
+        else
+        {
+            writeAverageElementValue<mat3ds>(dom, a, [](const FEMaterialPoint& mp) {
+                const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+                if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+                const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+                if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+                mat3d Fg = kp->m_Fg;
+                FEElasticMaterialPoint pe2;
+                pe2.m_F = Fg;
+                
+                return pe2.Strain();
+            });
+        }
+    }
+    else return false;
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthInfStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEKinematicGrowth* pme = dom.GetMaterial()->ExtractProperty<FEKinematicGrowth>();
+    if (pme == nullptr) return false;
+    
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        writeAverageElementValue<mat3ds>(dom, a, [](const FEMaterialPoint& mp) {
+            const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+            if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+            const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+            if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+            mat3d Fg = kp->m_Fg;
+
+            // displacement tensor
+            mat3d U = Fg - mat3dd(1.0);
+            
+            // evaluate small strain tensor eij = 0.5*(Uij + Uji)
+            mat3ds e = U.sym();
+            
+            return e;
+        });
+    }
+    else return false;
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+bool FEPlotBeamStress::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEElasticBeamDomain* beam = dynamic_cast<FEElasticBeamDomain*>(&dom);
+	if (beam == nullptr) return false;
+
+	for (int i = 0; i < beam->Elements(); ++i)
+	{
+		FEBeamElement& el = beam->Element(i);
+
+		vec3d t(0, 0, 0);
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// get the material point
+			FEElasticBeamMaterialPoint& mp = *(el.GetMaterialPoint(n)->ExtractData<FEElasticBeamMaterialPoint>());
+
+			t += mp.m_t;
+		}
+		t /= (double)nint;
+		a << t;
+	}
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+bool FEPlotBeamReferenceStress::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEElasticBeamDomain* beam = dynamic_cast<FEElasticBeamDomain*>(&dom);
+	if (beam == nullptr) return false;
+
+	for (int i = 0; i < beam->Elements(); ++i)
+	{
+		FEBeamElement& el = beam->Element(i);
+
+		vec3d T(0, 0, 0);
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// get the material point
+			FEElasticBeamMaterialPoint& mp = *(el.GetMaterialPoint(n)->ExtractData<FEElasticBeamMaterialPoint>());
+			quatd Ri = mp.m_Rt.Conjugate();
+			T += Ri*mp.m_t;
+		}
+		T /= (double)nint;
+		a << T;
+	}
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+bool FEPlotBeamStressCouple::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEElasticBeamDomain* beam = dynamic_cast<FEElasticBeamDomain*>(&dom);
+	if (beam == nullptr) return false;
+
+	for (int i = 0; i < beam->Elements(); ++i)
+	{
+		FEBeamElement& el = beam->Element(i);
+
+		vec3d m(0, 0, 0);
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// get the material point
+			FEElasticBeamMaterialPoint& mp = *(el.GetMaterialPoint(n)->ExtractData<FEElasticBeamMaterialPoint>());
+
+			m += mp.m_m;
+		}
+		m /= (double)nint;
+		a << m;
+	}
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+bool FEPlotBeamReferenceStressCouple::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEElasticBeamDomain* beam = dynamic_cast<FEElasticBeamDomain*>(&dom);
+	if (beam == nullptr) return false;
+
+	for (int i = 0; i < beam->Elements(); ++i)
+	{
+		FEBeamElement& el = beam->Element(i);
+
+		vec3d M(0, 0, 0);
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// get the material point
+			FEElasticBeamMaterialPoint& mp = *(el.GetMaterialPoint(n)->ExtractData<FEElasticBeamMaterialPoint>());
+			quatd Ri = mp.m_Rt.Conjugate();
+			M += Ri*mp.m_m;
+		}
+		M /= (double)nint;
+		a << M;
+	}
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+bool FEPlotBeamStrain::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEElasticBeamDomain* beam = dynamic_cast<FEElasticBeamDomain*>(&dom);
+	if (beam == nullptr) return false;
+
+	for (int i = 0; i < beam->Elements(); ++i)
+	{
+		FEBeamElement& el = beam->Element(i);
+
+		vec3d t(0, 0, 0);
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// get the material point
+			FEElasticBeamMaterialPoint& mp = *(el.GetMaterialPoint(n)->ExtractData<FEElasticBeamMaterialPoint>());
+
+			t += mp.m_Rt * mp.m_Gamma;
+		}
+		t /= (double)nint;
+		a << t;
+	}
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+bool FEPlotBeamCurvature::Save(FEDomain& dom, FEDataStream& a)
+{
+	FEElasticBeamDomain* beam = dynamic_cast<FEElasticBeamDomain*>(&dom);
+	if (beam == nullptr) return false;
+
+	for (int i = 0; i < beam->Elements(); ++i)
+	{
+		FEBeamElement& el = beam->Element(i);
+
+		vec3d t(0, 0, 0);
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// get the material point
+			FEElasticBeamMaterialPoint& mp = *(el.GetMaterialPoint(n)->ExtractData<FEElasticBeamMaterialPoint>());
+
+			t += mp.m_Rt*mp.m_Kappa;
+		}
+		t /= (double)nint;
+		a << t;
+	}
+
+	return true;
+}
+
+//=============================================================================
+//! Store the average right stretch
+class FEGrowthRightStretch
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+        const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+        if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        mat3d Fg = kp->m_Fg;
+        FEElasticMaterialPoint pe2;
+        pe2.m_F = Fg;
+        
+        return pe2.RightStretch();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthRightStretch::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEKinematicGrowth* pme = dom.GetMaterial()->ExtractProperty<FEKinematicGrowth>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FEGrowthRightStretch());
+    return true;
+}
+
+//=============================================================================
+//! Store the average right stretch
+class FEGrowthLeftStretch
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+        const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+        if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        mat3d Fg = kp->m_Fg;
+        FEElasticMaterialPoint pe2;
+        pe2.m_F = Fg;
+        
+        return pe2.LeftStretch();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthLeftStretch::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEKinematicGrowth* pme = dom.GetMaterial()->ExtractProperty<FEKinematicGrowth>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FEGrowthLeftStretch());
+    return true;
+}
+
+//=============================================================================
+//! Store the average growth right Hencky
+class FEGrowthRightHencky
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+        const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+        if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        mat3d Fg = kp->m_Fg;
+        FEElasticMaterialPoint pe2;
+        pe2.m_F = Fg;
+        
+        return pe2.RightHencky();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthRightHencky::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEKinematicGrowth* pme = dom.GetMaterial()->ExtractProperty<FEKinematicGrowth>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FEGrowthRightHencky());
+    return true;
+}
+
+//=============================================================================
+//! Store the average left Hencky
+class FEGrowthLeftHencky
+{
+public:
+    mat3ds operator()(const FEMaterialPoint& mp)
+    {
+        const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+        if (pe == nullptr) return mat3ds(0, 0, 0, 0, 0, 0);
+        const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+        if (kp == 0) return mat3ds(0, 0, 0, 0, 0, 0);
+        mat3d Fg = kp->m_Fg;
+        FEElasticMaterialPoint pe2;
+        pe2.m_F = Fg;
+
+        return pe2.LeftHencky();
+    }
+};
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthLeftHencky::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEKinematicGrowth* pme = dom.GetMaterial()->ExtractProperty<FEKinematicGrowth>();
+    if (pme == nullptr) return false;
+    writeAverageElementValue<mat3ds>(dom, a, FEGrowthLeftHencky());
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotGrowthRelativeVolume::Save(FEDomain &dom, FEDataStream& a)
+{
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
+            const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+            if (pe == nullptr) return 0.0;
+            const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+            return (kp ? kp->m_Fg.det() : 0.0);
+        });
+    }
+    else if (dom.Class() == FE_DOMAIN_SHELL)
+    {
+        // TODO: implement relative volume calculation for kinematic growth material in EAS and ANS shells
+        FEShellDomain* sd = dynamic_cast<FEShellDomain*>(&dom); assert(sd);
+        
+        FEShellDomainNew* newsd = dynamic_cast<FEShellDomainNew*>(sd);
+        FEElasticEASShellDomain* easd = dynamic_cast<FEElasticEASShellDomain*>(newsd);
+        FEElasticANSShellDomain* ansd = dynamic_cast<FEElasticANSShellDomain*>(newsd);
+        if (easd || ansd) {
+            return false;
+        }
+        else {
+            writeAverageElementValue<double>(dom, a, [](const FEMaterialPoint& mp) {
+                const FEElasticMaterialPoint* pe = mp.ExtractData<FEElasticMaterialPoint>();
+                if (pe == nullptr) return 0.0;
+                const FEKinematicMaterialPoint* kp = pe->ExtractData<FEKinematicMaterialPoint>();
+                return (kp ? kp->m_Fg.det() : 0.0);
+            });
+        }
+        return true;
+    }
+    else return false;
+    
+    return true;
+}
+
+
+bool FEPlotIdealGasPressure::Init()
+{
+	FEModel* fem = GetFEModel();
+	if (fem == nullptr) return false;
+
+	for (int i = 0; i < fem->ModelLoads(); ++i)
+	{
+		m_load = dynamic_cast<FEIdealGasPressure*>(fem->ModelLoad(i));
+		if (m_load) return true;
+	}
+	return (m_load != nullptr);
+}
+
+bool FEPlotIdealGasPressure::Save(FESurface& surf, FEDataStream& a)
+{
+	if (m_binit == false)
+	{
+		if (!Init()) return false;
+		m_binit = true;
+	}
+	if (m_load == nullptr) return false;
+
+	if (m_load->GetSurface().GetFacetSet() == surf.GetFacetSet())
+	{
+		a << m_load->GetCurrentPressure();
+		return true;
+	}
+	else return false;
+}
+
+bool FEPlotBodyForce::Save(FEDomain& dom, FEDataStream& a)
+{
+	if (dom.Class() == FE_DOMAIN_SOLID)
+	{
+		FEModel* fem = GetFEModel();
+		FESolidDomain& sd = static_cast<FESolidDomain&>(dom);
+		writeAverageElementValue<vec3d>(dom, a, [&](const FEMaterialPoint& mp) {
+			int NBL = fem->ModelLoads();
+			vec3d bf(0, 0, 0);
+			for (int j = 0; j < NBL; ++j)
+			{
+				FEBodyForce* pbf = dynamic_cast<FEBodyForce*>(fem->ModelLoad(j));
+				FEMaterialPoint& pt = const_cast<FEMaterialPoint&>(mp);
+				if (pbf && pbf->IsActive()) bf += pbf->force(pt);
+			}
+
+			// NOTE: We flip the sign because FEBio applies the negative of the body force.
+			// see FEElasticSolidDomain::BodyForce
+			return -bf;
+		});
+		return true;
+	}
+	return false;
+}
+
+bool FEPlotEdgeContactGap::Save(FEEdge& edge, FEDataStream& a)
+{
+	FEEdgeToSurfaceSlidingContactEdge* pe = dynamic_cast<FEEdgeToSurfaceSlidingContactEdge*>(&edge);
+	if (pe == nullptr) return false;
+
+	for (int i = 0; i < pe->Nodes(); ++i)
+	{
+		FEE2SSlidingContactPoint& pt = pe->m_points[i];
+		a << pt.m_gap;
+	}
+
+	return true;
+}
+
+bool FEPlotTotalLinearMomentum::Save(FEDomain& dom, FEDataStream& a)
+{
+	if (dom.Class() == FE_DOMAIN_SOLID)
+	{
+		FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+		if (pme == 0) return false;
+
+		vec3d L(0,0,0);
+		FESolidDomain& solidDomain = dynamic_cast<FESolidDomain&>(dom);
+		for (int i = 0; i < solidDomain.Elements(); ++i)
+		{
+			FESolidElement& el = solidDomain.Element(i);
+			int nint = el.GaussPoints();
+			double* w = el.GaussWeights();
+			for (int n = 0; n < nint; ++n)
+			{
+				FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+				FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
+
+				vec3d& v = pt.m_v;
+
+				double J0 = solidDomain.detJ0(el, n);
+
+				L.x += v.x * J0 * w[n];
+				L.y += v.y * J0 * w[n];
+				L.z += v.z * J0 * w[n];
+			}
+		}
+		a << L;
+		return true;
+	}
+	return false;
+}
+
+bool FEPlotTotalAngularMomentum::Save(FEDomain& dom, FEDataStream& a)
+{
+	if (dom.Class() == FE_DOMAIN_SOLID)
+	{
+		FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+		if (pme == 0) return false;
+
+		vec3d J(0, 0, 0);
+		FESolidDomain& solidDomain = dynamic_cast<FESolidDomain&>(dom);
+		for (int i = 0; i < solidDomain.Elements(); ++i)
+		{
+			FESolidElement& el = solidDomain.Element(i);
+			int nint = el.GaussPoints();
+			double* w = el.GaussWeights();
+			for (int n = 0; n < nint; ++n)
+			{
+				FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+				FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
+
+				vec3d& r = mp.m_rt;
+				vec3d& v = pt.m_v;
+
+				vec3d j = r ^ v;
+
+				double J0 = solidDomain.detJ0(el, n);
+
+				J.x += j.x * J0 * w[n];
+				J.y += j.y * J0 * w[n];
+				J.z += j.z * J0 * w[n];
+			}
+		}
+		a << J;
+		return true;
+	}
+	return false;
+}
+
+
+bool FEPlotTotalEnergy::Save(FEDomain& dom, FEDataStream& a)
+{
+	if (dom.Class() == FE_DOMAIN_SOLID)
+	{
+		FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+		if (pme == 0) return false;
+
+		double E = 0.0;
+		FESolidDomain& solidDomain = dynamic_cast<FESolidDomain&>(dom);
+		for (int i = 0; i < solidDomain.Elements(); ++i)
+		{
+			FESolidElement& el = solidDomain.Element(i);
+			int nint = el.GaussPoints();
+			double* w = el.GaussWeights();
+			for (int n = 0; n < nint; ++n)
+			{
+				FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+				FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
+
+				// strain energy
+				double W = pme->StrainEnergyDensity(mp);
+
+				// kinetic energy
+				double D = pme->Density(mp);
+				vec3d& v = pt.m_v;
+				double K = 0.5 * (v * v) * D;
+
+				double J0 = solidDomain.detJ0(el, n);
+
+				E += (K + W) * J0 * w[n];
+			}
+		}
+		a << E;
+		return true;
+	}
+	return false;
 }

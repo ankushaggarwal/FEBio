@@ -33,8 +33,9 @@ SOFTWARE.*/
 #include <FECore/FEModel.h>
 #include "RigidBC.h"
 #include "FERigidMaterial.h"
-
-REGISTER_SUPER_CLASS(FERigidBody, FEOBJECT_ID);
+#include "FERigidSolidDomain.h"
+#include "FERigidShellDomain.h"
+#include <FECore/log.h>
 
 //-----------------------------------------------------------------------------
 BEGIN_FECORE_CLASS(FERigidBody, FECoreBase)
@@ -165,55 +166,36 @@ bool FERigidBody::Init()
 //! Set the rigid body's center of mass directly
 void FERigidBody::SetCOM(vec3d rc)
 {
-	m_r0 = m_rt = rc;
+	m_r0 = m_rp = m_rt = rc;
 }
-
 
 //-----------------------------------------------------------------------------
 //! Update the mass of the rigid body
 void FERigidBody::UpdateMass()
 {
+	// total mass of rigid body
+	m_mass = 0;
+
+	// loop over all domains
 	FEModel& fem = *GetFEModel();
-
-	// get the mesh
 	FEMesh& mesh = fem.GetMesh();
-
-	// initialize some data
-	m_mass = 0;			// total mass of rigid body
-	mat3dd I(1);        // identity tensor
-
-	// loop over all elements
 	for (int nd = 0; nd < mesh.Domains(); ++nd)
 	{
-		// TODO: I should convert to a FERigidSolidDomain or FERigidShellDomain
-		if (mesh.Domain(nd).Class() == FE_DOMAIN_SOLID)
+		FEDomain& dom = mesh.Domain(nd);
+		FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(dom.GetMaterial());
+		if (pm && (pm->GetRigidBodyID() == m_nID))
 		{
-			FESolidDomain* pbd = static_cast<FESolidDomain*>(&mesh.Domain(nd));
-			FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(pbd->GetMaterial());
-			// make sure this element belongs to the rigid body
-			if (pm && (pm->GetRigidBodyID() == m_nID))
-			{
-				// loop over all elements
-				for (int iel = 0; iel<pbd->Elements(); ++iel)
-				{
-					FESolidElement& el = pbd->Element(iel);
+			FERigidSolidDomain* pbd = dynamic_cast<FERigidSolidDomain*>(&dom);
+			if (pbd) m_mass += pbd->CalculateMass();
 
-					// loop over integration points
-					int nint = el.GaussPoints();
-					double* gw = el.GaussWeights();
-					for (int n = 0; n<nint; ++n)
-					{
-						FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-
-						// calculate jacobian
-						double detJ = pbd->detJ0(el, n);
-
-						// add to total mass
-						m_mass += pm->Density(mp)*detJ*gw[n];
-					}
-				}
-			}
+			FERigidShellDomain* psd = dynamic_cast<FERigidShellDomain*>(&dom);
+			if (psd) m_mass += psd->CalculateMass();
 		}
+	}
+
+	if (m_mass == 0)
+	{
+		feLogWarning("Zero mass for rigid body \"%s.\"", GetName().c_str());
 	}
 }
 
@@ -223,140 +205,59 @@ void FERigidBody::UpdateMass()
 //!
 void FERigidBody::UpdateCOM()
 {
-	// get the mesh
+	// center of mass
+	vec3d rc(0,0,0);
+
+	// loop over all domains
 	FEModel& fem = *GetFEModel();
 	FEMesh& mesh = fem.GetMesh();
-
-	// initialize some data
-	vec3d rc(0,0,0);	// center of mass
-
-	// nodal coordinates
-	vec3d r0[FEElement::MAX_NODES];
-	
-	// loop over all elements
 	for (int nd=0; nd < mesh.Domains(); ++nd)
 	{
-		// TODO: I should convert to a FERigidSolidDomain or FERigidShellDomain
-		if (mesh.Domain(nd).Class() == FE_DOMAIN_SOLID)
+		FEDomain& dom = mesh.Domain(nd);
+		FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(dom.GetMaterial());
+		if (pm && (pm->GetRigidBodyID() == m_nID))
 		{
-			FESolidDomain* pbd = static_cast<FESolidDomain*>(&mesh.Domain(nd));
-			FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(pbd->GetMaterial());
-			// make sure this element belongs to the rigid body
-			if (pm && (pm->GetRigidBodyID() == m_nID))
-			{
-				// loop over all elements
-				for (int iel=0; iel<pbd->Elements(); ++iel)
-				{	
-					FESolidElement& el = pbd->Element(iel);
+			FERigidSolidDomain* pbd = dynamic_cast<FERigidSolidDomain*>(&dom);
+			if (pbd) rc += pbd->CalculateCOM();
 
-					// nr of integration points
-					int nint = el.GaussPoints();
-
-					// number of nodes
-					int neln = el.Nodes();
-
-					// initial coordinates
-					for (int i=0; i<neln; ++i) r0[i] = pbd->GetMesh()->Node(el.m_node[i]).m_r0;
-
-					// integration weights
-					double* gw = el.GaussWeights();
-
-					// loop over integration points
-					for (int n=0; n<nint; ++n)
-					{
-						FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-
-						// calculate jacobian
-						double detJ = pbd->detJ0(el, n);
-
-						// shape functions at integration point
-						double* H = el.H(n);
-
-						double dens = pm->Density(mp);
-
-						// add to com and moi
-						for (int i=0; i<el.Nodes(); ++i)
-						{
-							rc += r0[i]*H[i]*detJ*gw[n]*dens;
-						}
-					}
-				}
-			}
+			FERigidShellDomain* psd = dynamic_cast<FERigidShellDomain*>(&dom);
+			if (psd) rc += psd->CalculateCOM();
 		}
 	}
 
 	// normalize com
 	if (m_mass != 0) rc /= m_mass;
-    
+
 	// store com
-	m_r0 = m_rt = rc;
+	SetCOM(rc);
 }
 
 //-----------------------------------------------------------------------------
 void FERigidBody::UpdateMOI()
 {
-	// get the mesh
-	FEModel& fem = *GetFEModel();
-	FEMesh& mesh = fem.GetMesh();
-
 	// initialize some data
 	mat3d moi(0, 0, 0, 0, 0, 0, 0, 0, 0);    // mass moment of inertia about origin
-	mat3dd I(1);        // identity tensor
 
-	// nodal coordinates
-	vec3d r0[FEElement::MAX_NODES];
-
-	// loop over all elements
+	// loop over all domains
+	FEModel& fem = *GetFEModel();
+	FEMesh& mesh = fem.GetMesh();
 	for (int nd = 0; nd < mesh.Domains(); ++nd)
 	{
-		// TODO: I should convert to a FERigidSolidDomain or FERigidShellDomain
-		if (mesh.Domain(nd).Class() == FE_DOMAIN_SOLID)
+		FEDomain& dom = mesh.Domain(nd);
+		FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(dom.GetMaterial());
+		if (pm && (pm->GetRigidBodyID() == m_nID))
 		{
-			FESolidDomain* pbd = static_cast<FESolidDomain*>(&mesh.Domain(nd));
-			FERigidMaterial* pm = dynamic_cast<FERigidMaterial*>(pbd->GetMaterial());
-			// make sure this element belongs to the rigid body
-			if (pm && (pm->GetRigidBodyID() == m_nID))
-			{
-				// loop over all elements
-				for (int iel = 0; iel<pbd->Elements(); ++iel)
-				{
-					FESolidElement& el = pbd->Element(iel);
+			FERigidSolidDomain* pbd = dynamic_cast<FERigidSolidDomain*>(&dom);
+			if (pbd) moi += pbd->CalculateMOI();
 
-					// initial coordinates
-					int neln = el.Nodes();
-					for (int i = 0; i<neln; ++i) r0[i] = pbd->GetMesh()->Node(el.m_node[i]).m_r0;
-
-					// loop over integration points
-					double* gw = el.GaussWeights();
-					int nint = el.GaussPoints();
-					for (int n = 0; n<nint; ++n)
-					{
-						FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-
-						// calculate jacobian
-						double detJ = pbd->detJ0(el, n);
-
-						// shape functions at integration point
-						double* H = el.H(n);
-
-						double dens = pm->Density(mp);
-
-						// add to moi
-						for (int i = 0; i<neln; ++i)
-						{
-							for (int j = 0; j<neln; ++j)
-							{
-								moi += ((r0[i] * r0[j])*I - (r0[i] & r0[j]))*H[i] * H[j] * detJ*gw[n] * dens;
-							}
-						}
-					}
-				}
-			}
+			FERigidShellDomain* psd = dynamic_cast<FERigidShellDomain*>(&dom);
+			if (psd) moi += psd->CalculateMOI();
 		}
 	}
 
 	// use parallel axis theorem to transfer moi to com
 	// and store moi
+	mat3dd I(1);        // identity tensor
 	vec3d rc = m_r0;
 	m_moi = moi.sym() - m_mass*((rc*rc)*I - dyad(rc));
 }
@@ -449,4 +350,51 @@ void FERigidBody::Serialize(DumpStream& ar)
 
 		// TODO: should I store parent rigid body (m_prb)
 	}
+}
+
+//-----------------------------------------------------------------------------
+// return the (instantaneous) helical axis relative to the ground
+void FERigidBody::InstantaneousHelicalAxis(vec3d& omega, vec3d& s, double& tdot)
+{
+    double dt = GetFEModel()->GetTime().timeIncrement;
+
+    // incremental rotation in spatial frame
+    omega = (m_wp + m_wt)/2;
+    vec3d rdot = (m_vt + m_vp)/2;
+    double rdm = rdot.norm();
+	vec3d n(omega); n.unit();
+    tdot = rdot*n;
+    vec3d r = (m_rt + m_rp)/2;     // midpoint value of r
+	vec3d w(omega);
+    double w2 = w.norm2();
+    s = (w2 > 0) ? (w ^ (rdot - n*tdot + (r ^ w)))/(w*w) : vec3d(0,0,0);
+    if ((w2 == 0) && (rdm > 0)) {
+        tdot = rdm/dt;
+        n = rdot.Normalize();
+        omega = n;
+    }
+}
+
+//-----------------------------------------------------------------------------
+// return the (finite) helical axis relative to the ground
+void FERigidBody::FiniteHelicalAxis(vec3d& omega, vec3d& s, double& tdot)
+{
+    // incremental rotation in spatial frame
+    quatd dQ = m_qt*m_qp.Inverse();
+    // clean-up roundoff errors
+    dQ.MakeUnit();
+    vec3d rdot = m_rt - m_rp;
+    double rdm = rdot.norm();
+    vec3d w = dQ.GetRotationVector();
+	vec3d n(w); n.unit();
+	omega = w;
+    tdot = rdot*n;
+    vec3d r = (m_rt + m_rp)/2;     // midpoint value of r
+    double w2 = w*w;
+    s = (w2 > 0) ? (w ^ (rdot - n*tdot + (r ^ w)))/(w*w) : vec3d(0,0,0);
+    if ((w2 == 0) && (rdm > 0)) {
+        tdot = rdm;
+        n = rdot.Normalize();
+        omega = n;
+    }
 }

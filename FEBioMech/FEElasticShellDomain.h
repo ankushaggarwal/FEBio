@@ -30,10 +30,11 @@ SOFTWARE.*/
 #include "FESSIShellDomain.h"
 #include "FEElasticDomain.h"
 #include "FESolidMaterial.h"
+#include "febiomech_api.h"
 
 //-----------------------------------------------------------------------------
 //! Domain described by 3D shell elements
-class FEElasticShellDomain : public FESSIShellDomain, public FEElasticDomain
+class FEBIOMECH_API FEElasticShellDomain : public FESSIShellDomain, public FEElasticDomain
 {
 public:
 	FEElasticShellDomain(FEModel* pfem);
@@ -128,10 +129,15 @@ protected:
     double              m_beta;
     bool                m_update_dynamic;    //!< flag for updating quantities only used in dynamic analysis
 
+	bool	m_secant_stress;	//!< use secant approximation to stress
+	bool	m_secant_tangent;   //!< flag for using secant tangent
+
 protected:
 	FEDofList	m_dofV;
 	FEDofList	m_dofSV;
 	FEDofList	m_dofSA;
 	FEDofList	m_dofR;
 	FEDofList	m_dof;
+
+	DECLARE_FECORE_CLASS();
 };

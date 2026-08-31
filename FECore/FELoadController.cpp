@@ -30,10 +30,9 @@ SOFTWARE.*/
 #include "FELoadController.h"
 #include "DumpStream.h"
 
-REGISTER_SUPER_CLASS(FELoadController, FELOADCONTROLLER_ID);
-
-FELoadController::FELoadController(FEModel* fem) : FECoreBase(fem)
+FELoadController::FELoadController(FEModel* fem) : FEModelComponent(fem)
 {
+	m_value = 0.0;
 }
 
 void FELoadController::Evaluate(double time)
@@ -45,4 +44,9 @@ void FELoadController::Serialize(DumpStream& ar)
 {
 	FECoreBase::Serialize(ar);
 	ar & m_value;
+}
+
+void FELoadController::Reset()
+{
+	m_value = 0.0;
 }

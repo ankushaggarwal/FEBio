@@ -28,7 +28,6 @@ SOFTWARE.*/
 
 #pragma once
 #include <FECore/FEShellDomain.h>
-#include <FECore/FEModel.h>
 #include <FECore/FEModelParam.h>
 #include <functional>
 #include "febiomech_api.h"
@@ -43,19 +42,19 @@ class FEBIOMECH_API FESSIShellDomain : public FEShellDomainNew
 public:
 	FESSIShellDomain(FEModel* pfem);
 
-    //! initialize domain
-    //! one-time initialization, called during model initialization
+	//! initialize domain
+	//! one-time initialization, called during model initialization
 	bool Init() override;
 
 	//! serialization
 	void Serialize(DumpStream& ar) override;
-    
+
 	//! Update element data prior to solving time step
 	void PreSolveUpdate(const FETimeInfo& timeInfo) override;
-    
-    //! Initialize shell normals
-    void InitShells() override;
-    
+
+	//! Initialize shell normals
+	bool InitShells() override;
+
 protected:
 	//! Find interfaces between solid element faces and shell elements
 	void FindSSI();
@@ -92,6 +91,9 @@ public:
     //! calculates covariant basis vectors at any point
     void CoBaseVectors(FEShellElement& el, double r, double s, double t, vec3d g[3]);
     
+    //! calculates covariant basis vectors at any point
+    void CoBaseVectors(FEShellElement& el, double r, double s, double t, vec3d g[3], const double alpha);
+    
     //! calculates covariant basis vectors at an integration point at previous time
     void CoBaseVectorsP(FEShellElement& el, int n, vec3d g[3]);
     
@@ -106,6 +108,9 @@ public:
     
     //! calculates contravariant basis vectors at any point
     void ContraBaseVectors(FEShellElement& el, double r, double s, double t, vec3d g[3]);
+    
+    //! calculates contravariant basis vectors at any point
+    void ContraBaseVectors(FEShellElement& el, double r, double s, double t, vec3d g[3], const double alpha);
     
     // jacobian with respect to current frame at an integration point
     double detJ(FEShellElement& el, int n);

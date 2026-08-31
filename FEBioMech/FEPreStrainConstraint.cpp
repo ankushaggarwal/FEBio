@@ -29,6 +29,7 @@ SOFTWARE.*/
 #include "FEUncoupledElasticMixture.h"
 #include "FEPreStrainElastic.h"
 #include <FECore/FECoreKernel.h>
+#include <FECore/FEMesh.h>
 #include <FECore/log.h>
 
 //-----------------------------------------------------------------------------
@@ -49,19 +50,12 @@ FEPreStrainConstraint::FEPreStrainConstraint(FEModel* pfem) : FENLConstraint(pfe
 	m_tol = 0.0;
 }
 
-//-----------------------------------------------------------------------------
-bool FEPreStrainConstraint::Init()
-{
-	return true;
-}
-
-//-----------------------------------------------------------------------------
 bool FEPreStrainConstraint::Augment(int naug, const FETimeInfo& tp)
 {
 	if (IsActive() == false) return true;
 	if (m_laugon == false) return true;
 
-	FEMesh& m = GetFEModel()->GetMesh();
+	FEMesh& m = GetMesh();
 	int ND = m.Domains();
 
 	// do pre-strain augmentations
@@ -69,19 +63,15 @@ bool FEPreStrainConstraint::Augment(int naug, const FETimeInfo& tp)
 	for (int i=0; i<ND; ++i)
 	{
 		FEDomain& dom = m.Domain(i);
-		if (dom.Class() == FE_DOMAIN_SOLID)
+		FEMaterial* pmat = dom.GetMaterial();
+		FEPrestrainMaterial* pm = dynamic_cast<FEPrestrainMaterial*>(pmat);
+		if (pm) bconv &= Augment(&dom, 0, naug);
+		else
 		{
-			FESolidDomain* psd = static_cast<FESolidDomain*>(&dom);
-			FEMaterial* pmat = psd->GetMaterial();
-			FEPrestrainMaterial* pm = dynamic_cast<FEPrestrainMaterial*>(pmat);
-			if (pm) bconv &= Augment(psd, 0, naug);
-			else
+			for (int j=0; j<pmat->Properties(); ++j)
 			{
-				for (int j=0; j<pmat->Properties(); ++j)
-				{
-					FEPrestrainMaterial* pmj = dynamic_cast<FEPrestrainMaterial*>(pmat->GetProperty(j));
-					if (pmj) bconv &= Augment(psd, j, naug);
-				}
+				FEPrestrainMaterial* pmj = dynamic_cast<FEPrestrainMaterial*>(pmat->GetProperty(j));
+				if (pmj) bconv &= Augment(&dom, j, naug);
 			}
 		}
 	}
@@ -91,7 +81,7 @@ bool FEPreStrainConstraint::Augment(int naug, const FETimeInfo& tp)
 
 //-----------------------------------------------------------------------------
 //! Check an augmentation for a specific domain/material pair
-bool FEPreStrainConstraint::Augment(FESolidDomain* psd, int n, int naug)
+bool FEPreStrainConstraint::Augment(FEDomain* psd, int n, int naug)
 {
 	// make sure this is a prestrain material
 	FEPrestrainMaterial* pmat = dynamic_cast<FEPrestrainMaterial*>(psd->GetMaterial());
@@ -103,7 +93,7 @@ bool FEPreStrainConstraint::Augment(FESolidDomain* psd, int n, int naug)
 	int NE = psd->Elements();
 	for (int i=0; i<NE; ++i)
 	{
-		FESolidElement& el = psd->Element(i);
+		FEElement& el = psd->ElementRef(i);
 		int nint = el.GaussPoints();
 		for (int i=0; i<nint; ++i)
 		{
@@ -121,7 +111,7 @@ bool FEPreStrainConstraint::Augment(FESolidDomain* psd, int n, int naug)
 			if (normU >= max_err) max_err = normU;
 		}
 	}
-	if (max_err >= m_tol) bconv = false;
+	if ((m_tol > 0) && (max_err >= m_tol)) bconv = false;
 
 	feLog("max norm = %lg (%lg)\n", max_err, m_tol);
 
@@ -134,7 +124,7 @@ bool FEPreStrainConstraint::Augment(FESolidDomain* psd, int n, int naug)
 	{
 		for (int i=0; i<NE; ++i)
 		{
-			FESolidElement& el = psd->Element(i);
+			FEElement& el = psd->ElementRef(i);
 			int nint = el.GaussPoints();
 			for (int i=0; i<nint; ++i)
 			{
@@ -181,14 +171,13 @@ mat3d FEInSituStretchConstraint::UpdateFc(const mat3d& F, const mat3d& Fc_prev, 
 
 	FEElasticMaterial* elasticMat = pmat->GetElasticMaterial();
 	if (elasticMat == nullptr) return mat3dd(1.0);
-	FEParam* fp = elasticMat->FindParameter("fiber");
-	if (fp == nullptr) return mat3dd(1.0);
-	if (fp->type() != FE_PARAM_VEC3D_MAPPED) return mat3dd(1.0);
-	FEParamVec3& fiber = fp->value<FEParamVec3>();
+
+	FEVec3dValuator* fiber = dynamic_cast<FEVec3dValuator*>(elasticMat->GetProperty("fiber"));
+	if (fiber == nullptr) return mat3dd(1.0);
 
 	// calculate the fiber stretch
 	mat3d Q = elasticMat->GetLocalCS(mp);
-	vec3d a0 = fiber(mp);
+	vec3d a0 = fiber->unitVector(mp);
 	vec3d ar = Q * a0;
 	vec3d a = F*ar;
 	double l = a.norm();

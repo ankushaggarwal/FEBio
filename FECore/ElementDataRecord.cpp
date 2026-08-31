@@ -31,17 +31,10 @@ SOFTWARE.*/
 #include "FECoreKernel.h"
 #include "FEModel.h"
 #include "FEDomain.h"
-
-REGISTER_SUPER_CLASS(FELogElemData, FEELEMLOGDATA_ID)
-
-//-----------------------------------------------------------------------------
-FELogElemData::FELogElemData(FEModel* fem) : FECoreBase(fem) {}
+#include "FELogElemMath.h"
 
 //-----------------------------------------------------------------------------
-FELogElemData::~FELogElemData() {}
-
-//-----------------------------------------------------------------------------
-ElementDataRecord::ElementDataRecord(FEModel* pfem, const char* szfile) : DataRecord(pfem, szfile, FE_DATA_ELEM)
+ElementDataRecord::ElementDataRecord(FEModel* pfem) : DataRecord(pfem, FE_DATA_ELEM)
 {
 	m_offset = 0;
 }
@@ -58,7 +51,21 @@ void ElementDataRecord::SetData(const char *szexpr)
 	{
 		ch = strchr(sz, ';');
 		if (ch) *ch++ = 0;
-		FELogElemData* pdata = fecore_new<FELogElemData>(sz, m_pfem);
+		FELogElemData* pdata = nullptr;
+		if (sz && sz[0] == '=')
+		{
+			FELogElemMath* logMath = fecore_alloc(FELogElemMath, GetFEModel());
+			if (logMath)
+			{
+				string smath(sz + 1);
+				if (logMath->SetExpression(smath))
+				{
+					pdata = logMath;
+				}
+			}
+		}
+		else
+			pdata = fecore_new<FELogElemData>(sz, GetFEModel());
 		if (pdata) m_Data.push_back(pdata);
 		else throw UnknownDataField(sz);
 		sz = ch;
@@ -73,7 +80,7 @@ double ElementDataRecord::Evaluate(int item, int ndata)
 	if (m_ELT.empty()) BuildELT();
 
 	// find the element
-	FEMesh& mesh = m_pfem->GetMesh();
+	FEMesh& mesh = GetFEModel()->GetMesh();
 	int index = item - m_offset;
 	if ((index >= 0) && (index < m_ELT.size()))
 	{
@@ -92,7 +99,7 @@ double ElementDataRecord::Evaluate(int item, int ndata)
 void ElementDataRecord::BuildELT()
 {
 	m_ELT.clear();
-	FEMesh& m = m_pfem->GetMesh();
+	FEMesh& m = GetFEModel()->GetMesh();
 
 	// find the min, max ID
 	int minID = -1, maxID = 0;
@@ -144,7 +151,7 @@ int ElementDataRecord::Size() const
 //-----------------------------------------------------------------------------
 void ElementDataRecord::SelectAllItems()
 {
-	FEMesh& m = m_pfem->GetMesh();
+	FEMesh& m = GetFEModel()->GetMesh();
 	int n = m.Elements();
 	m_item.resize(n);
 	n = 0;
@@ -168,4 +175,12 @@ void ElementDataRecord::SetElementSet(FEElementSet* pg)
 	assert(n);
 	m_item.resize(n);
 	for (int i=0; i<n; ++i) m_item[i] = (*pg)[i];
+}
+
+//-----------------------------------------------------------------------------
+void ElementDataRecord::SetItemList(FEItemList* itemList, const vector<int>& selection)
+{
+	FEElementSet* pg = dynamic_cast<FEElementSet*>(itemList);
+	assert(selection.empty());
+	SetElementSet(pg);
 }

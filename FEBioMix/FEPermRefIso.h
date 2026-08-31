@@ -51,10 +51,9 @@ public:
 	bool Validate() override;
 		
 public:
-	double	m_perm0;		//!< permeability for I term
-	double	m_perm1;		//!< permeability for b term
-	double	m_perm2;		//!< permeability for b^2 term
-	double	m_phi0;			//!< solid volume fraction in reference state
+	FEParamDouble m_perm0;		//!< permeability for I term
+	FEParamDouble m_perm1;		//!< permeability for b term
+	FEParamDouble m_perm2;		//!< permeability for b^2 term
 	double	m_M;			//!< nonlinear exponential coefficient
 	double	m_alpha;		//!< nonlinear power exponent
 		

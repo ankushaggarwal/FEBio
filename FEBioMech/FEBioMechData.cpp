@@ -30,6 +30,7 @@ SOFTWARE.*/
 #include "FEBioMechData.h"
 #include "FEElasticMaterial.h"
 #include "FEUncoupledMaterial.h"
+#include "FEReactiveMaterialPoint.h"
 #include "FEDamageMaterialPoint.h"
 #include "FEReactivePlasticityMaterialPoint.h"
 #include "FEReactivePlasticDamageMaterialPoint.h"
@@ -38,6 +39,7 @@ SOFTWARE.*/
 #include "FERigidMaterial.h"
 #include "FESolidSolver.h"
 #include "FESolidSolver2.h"
+#include "FEExplicitSolidSolver.h"
 #include "FERigidBody.h"
 #include "FECore/FEModel.h"
 #include "FECore/FEAnalysis.h"
@@ -45,170 +47,164 @@ SOFTWARE.*/
 #include "FEVolumeConstraint.h"
 #include "FEContactSurface.h"
 #include "FEDiscreteElasticMaterial.h"
+#include "FESlidingInterface.h"
+#include "FEPreStrainElastic.h"
+#include <FECore/FESolidDomain.h>
 
 //-----------------------------------------------------------------------------
-double FENodeXPos::value(int nnode) 
+double FENodeXPos::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.m_rt.x; 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeYPos::value(int nnode) 
+double FENodeYPos::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.m_rt.y; 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeZPos::value(int nnode) 
+double FENodeZPos::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.m_rt.z; 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeXDisp::value(int nnode) 
+double FENodeXDisp::value(const FENode& node)
 {
 	const int dof_X = GetFEModel()->GetDOFIndex("x");
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.get(dof_X); 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeYDisp::value(int nnode) 
+double FENodeYDisp::value(const FENode& node)
 {
 	const int dof_Y = GetFEModel()->GetDOFIndex("y");
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.get(dof_Y); 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeZDisp::value(int nnode) 
+double FENodeZDisp::value(const FENode& node)
 {
 	const int dof_Z = GetFEModel()->GetDOFIndex("z");
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.get(dof_Z); 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeXVel::value(int nnode) 
+double FENodeXVel::value(const FENode& node)
 {
 	const int dof_VX = GetFEModel()->GetDOFIndex("vx");
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.get(dof_VX);
 }
 
 //-----------------------------------------------------------------------------
-double FENodeYVel::value(int nnode) 
+double FENodeYVel::value(const FENode& node)
 {
 	const int dof_VY = GetFEModel()->GetDOFIndex("vy");
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.get(dof_VY); 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeZVel::value(int nnode) 
+double FENodeZVel::value(const FENode& node)
 {
 	const int dof_VZ = GetFEModel()->GetDOFIndex("vz");
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.get(dof_VZ);
 }
 
 //-----------------------------------------------------------------------------
-double FENodeXAcc::value(int nnode) 
+double FENodeXAcc::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.m_at.x; 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeYAcc::value(int nnode) 
+double FENodeYAcc::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.m_at.y; 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeZAcc::value(int nnode) 
+double FENodeZAcc::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FENode& node = mesh.Node(nnode);
 	return node.m_at.z; 
 }
 
 //-----------------------------------------------------------------------------
-double FENodeForceX::value(int nnode) 
+double FENodeForceX::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FESolidSolver2* psolid_solver = dynamic_cast<FESolidSolver2*>(GetFEModel()->GetCurrentStep()->GetFESolver());
-	if (psolid_solver)
+	FEModel& fem = *GetFEModel();
+	int dofX = fem.GetDOFIndex("x");
+	if (dofX >= 0)
 	{
-		vector<double>& Fr = psolid_solver->m_Fr;
-		vector<double>& Fn = psolid_solver->m_Fn;
-		vector<int>& id = mesh.Node(nnode).m_ID;
-
-		double Fx = 0.0;
-		if (id[0] >= 0) Fx = Fn[id[0]];
-		else if (-id[0] - 2 >= 0) Fx = Fr[-id[0] - 2];
-		return Fx;
+		double Rx = node.get_load(dofX);
+		return Rx;
 	}
+
 	return 0;
 }
 
 //-----------------------------------------------------------------------------
-double FENodeForceY::value(int nnode) 
+double FENodeForceY::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FESolidSolver2* psolid_solver = dynamic_cast<FESolidSolver2*>(GetFEModel()->GetCurrentStep()->GetFESolver());
-	if (psolid_solver)
+	FEModel& fem = *GetFEModel();
+	int dofY = fem.GetDOFIndex("y");
+	if (dofY >= 0)
 	{
-		vector<double>& Fr = psolid_solver->m_Fr;
-		vector<int>& id = mesh.Node(nnode).m_ID;
-		return (-id[1] - 2 >= 0 ? Fr[-id[1]-2] : 0);
+		double Ry = node.get_load(dofY);
+		return Ry;
 	}
+
 	return 0;
 }
 
 //-----------------------------------------------------------------------------
-double FENodeForceZ::value(int nnode) 
+double FENodeForceZ::value(const FENode& node)
 {
-	FEMesh& mesh = GetFEModel()->GetMesh();
-	FESolidSolver2* psolid_solver = dynamic_cast<FESolidSolver2*>(GetFEModel()->GetCurrentStep()->GetFESolver());
-	if (psolid_solver)
+	FEModel& fem = *GetFEModel();
+	int dofZ = fem.GetDOFIndex("z");
+	if (dofZ >= 0)
 	{
-		vector<double>& Fr = psolid_solver->m_Fr;
-		vector<int>& id = mesh.Node(nnode).m_ID;
-		return (-id[2] - 2 >= 0 ? Fr[-id[2]-2] : 0);
+		double Rz = node.get_load(dofZ);
+		return Rz;
 	}
+
 	return 0;
 }
 
 //-----------------------------------------------------------------------------
 double FELogContactGap::value(FESurfaceElement& el)
 {
+	FEContactSurface* ps = dynamic_cast<FEContactSurface*>(el.GetMeshPartition());
+	if (ps == nullptr) return 0.0;
+
+	// returned contact gap
 	double g = 0.0;
-	for (int i = 0; i < el.GaussPoints(); ++i)
+
+	// NOTE: the sliding surface does not use material points, so we need this little hack. 
+	FESlidingSurface* ss = dynamic_cast<FESlidingSurface*>(ps);
+	if (ss)
 	{
-		FEMaterialPoint& mp = *el.GetMaterialPoint(i);
-		FEContactMaterialPoint* cp = mp.ExtractData<FEContactMaterialPoint>();
-		if (cp)
+		for (int j = 0; j < el.Nodes(); ++j)
 		{
-			g += cp->m_gap;
+			double gj = ss->m_data[el.m_lnode[j]].m_gap;
+			g += gj;
 		}
+		g /= el.Nodes();
+		return g;
 	}
-	g /= (double)el.GaussPoints();
+	else
+	{
+		for (int i = 0; i < el.GaussPoints(); ++i)
+		{
+			FEMaterialPoint* mp = el.GetMaterialPoint(i);
+			FEContactMaterialPoint* cp = dynamic_cast<FEContactMaterialPoint*>(mp);
+			if (cp)
+			{
+				g += cp->m_gap;
+			}
+		}
+		g /= (double)el.GaussPoints();
+	}
 
 	return g;
 }
@@ -216,17 +212,35 @@ double FELogContactGap::value(FESurfaceElement& el)
 //-----------------------------------------------------------------------------
 double FELogContactPressure::value(FESurfaceElement& el)
 {
+	FEContactSurface* ps = dynamic_cast<FEContactSurface*>(el.GetMeshPartition());
+	if (ps == nullptr) return 0.0;
+
 	double Lm = 0.0;
-	for (int i = 0; i < el.GaussPoints(); ++i)
+
+	// NOTE: the sliding surface does not use material points, so we need this little hack. 
+	FESlidingSurface* ss = dynamic_cast<FESlidingSurface*>(ps);
+	if (ss)
 	{
-		FEMaterialPoint& mp = *el.GetMaterialPoint(i);
-		FEContactMaterialPoint* cp = mp.ExtractData<FEContactMaterialPoint>();
-		if (cp)
+		for (int j = 0; j < el.Nodes(); ++j)
 		{
-			Lm += cp->m_Ln;
+			double Lmj = ss->m_data[el.m_lnode[j]].m_Ln;
+			Lm += Lmj;
 		}
+		Lm /= el.Nodes();
 	}
-	Lm /= (double)el.GaussPoints();
+	else
+	{
+		for (int i = 0; i < el.GaussPoints(); ++i)
+		{
+			FEMaterialPoint* mp = el.GetMaterialPoint(i);
+			FEContactMaterialPoint* cp = dynamic_cast<FEContactMaterialPoint*>(mp);
+			if (cp)
+			{
+				Lm += cp->m_Ln;
+			}
+		}
+		Lm /= (double)el.GaussPoints();
+	}
 
 	return Lm;
 }
@@ -286,7 +300,7 @@ double FELogElemPosX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		FEMaterialPoint& pt = *el.GetMaterialPoint(i);
 		val += pt.m_rt.x;
 	}
 	return val / (double) nint;
@@ -299,7 +313,7 @@ double FELogElemPosY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		FEMaterialPoint& pt = *el.GetMaterialPoint(i);
 		val += pt.m_rt.y;
 	}
 	return val / (double) nint;
@@ -312,7 +326,7 @@ double FELogElemPosZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		FEMaterialPoint& pt = *el.GetMaterialPoint(i);
 		val += pt.m_rt.z;
 	}
 	return val / (double) nint;
@@ -325,8 +339,9 @@ double FELogElemJacobian::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_J;
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+			val += pt->m_J;
 	}
 	return val / (double) nint;
 }
@@ -338,9 +353,12 @@ double FELogElemStrainX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		val += E.xx();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			val += E.xx();
+		}
 	}
 	return val / (double) nint;
 }
@@ -352,9 +370,12 @@ double FELogElemStrainY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		val += E.yy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			val += E.yy();
+		}
 	}
 	return val / (double) nint;
 }
@@ -366,9 +387,12 @@ double FELogElemStrainZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		val += E.zz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			val += E.zz();
+		}
 	}
 	return val / (double) nint;
 }
@@ -380,9 +404,12 @@ double FELogElemStrainXY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		val += E.xy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			val += E.xy();
+		}
 	}
 	return val / (double) nint;
 }
@@ -394,9 +421,12 @@ double FELogElemStrainYZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		val += E.yz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			val += E.yz();
+		}
 	}
 	return val / (double) nint;
 }
@@ -408,9 +438,12 @@ double FELogElemStrainXZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		val += E.xz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			val += E.xz();
+		}
 	}
 	return val / (double) nint;
 }
@@ -423,10 +456,13 @@ double FELogElemStrain1::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		E.exact_eigen(l);
-		val += l[0];
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			E.exact_eigen(l);
+			val += l[0];
+		}
 	}
 	return val / (double) nint;
 }
@@ -439,19 +475,46 @@ double FELogElemStrainEffective::value(FEElement& el)
 	for (int n = 0; n < nint; ++n)
 	{
 		FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-		FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
+		FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+		if (ep)
+		{
+			mat3ds C = ep->LeftCauchyGreen();
+			mat3dd I(1.0);
+			mat3ds E = (C - I) * 0.5;
 
-		mat3ds C = ep.LeftCauchyGreen();
-		mat3dd I(1.0);
-		mat3ds E = (C - I)*0.5;
-
-		Eavg += E;
+			Eavg += E;
+		}
 	}
 	Eavg /= (double)nint;
 	double val = Eavg.effective_norm();
 
 	return val;
 }
+
+//-----------------------------------------------------------------------------
+double FELogElemMaxShearStrain::value(FEElement& el)
+{
+	int nint = el.GaussPoints();
+	mat3ds Eavg; Eavg.zero();
+	for (int n = 0; n < nint; ++n)
+	{
+		FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+		FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+		if (ep)
+		{
+			mat3ds C = ep->LeftCauchyGreen();
+			mat3dd I(1.0);
+			mat3ds E = (C - I) * 0.5;
+
+			Eavg += E;
+		}
+	}
+	Eavg /= (double)nint;
+	double val = Eavg.max_shear();
+
+	return val;
+}
+
 
 //-----------------------------------------------------------------------------
 double FELogElemStrain2::value(FEElement& el)
@@ -461,10 +524,13 @@ double FELogElemStrain2::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		E.exact_eigen(l);
-		val += l[1];
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			E.exact_eigen(l);
+			val += l[1];
+		}
 	}
 	return val / (double) nint;
 }
@@ -477,10 +543,13 @@ double FELogElemStrain3::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds E = pt.Strain();
-		E.exact_eigen(l);
-		val += l[2];
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds E = pt->Strain();
+			E.exact_eigen(l);
+			val += l[2];
+		}
 	}
 	return val / (double) nint;
 }
@@ -492,9 +561,12 @@ double FELogElemInfStrainX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds e = pt.SmallStrain();
-		val += e.xx();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds e = pt->SmallStrain();
+			val += e.xx();
+		}
 	}
 	return val / (double)nint;
 }
@@ -506,9 +578,12 @@ double FELogElemInfStrainY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds e = pt.SmallStrain();
-		val += e.yy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds e = pt->SmallStrain();
+			val += e.yy();
+		}
 	}
 	return val / (double)nint;
 }
@@ -520,9 +595,12 @@ double FELogElemInfStrainZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds e = pt.SmallStrain();
-		val += e.zz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds e = pt->SmallStrain();
+			val += e.zz();
+		}
 	}
 	return val / (double)nint;
 }
@@ -534,9 +612,12 @@ double FELogElemInfStrainXY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds e = pt.SmallStrain();
-		val += e.xy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds e = pt->SmallStrain();
+			val += e.xy();
+		}
 	}
 	return val / (double)nint;
 }
@@ -548,9 +629,12 @@ double FELogElemInfStrainYZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds e = pt.SmallStrain();
-		val += e.yz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds e = pt->SmallStrain();
+			val += e.yz();
+		}
 	}
 	return val / (double)nint;
 }
@@ -562,9 +646,12 @@ double FELogElemInfStrainXZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds e = pt.SmallStrain();
-		val += e.xz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds e = pt->SmallStrain();
+			val += e.xz();
+		}
 	}
 	return val / (double)nint;
 }
@@ -576,9 +663,12 @@ double FELogElemRightStretchX::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        val += U.xx();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            val += U.xx();
+        }
     }
     return val / (double) nint;
 }
@@ -590,9 +680,12 @@ double FELogElemRightStretchY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        val += U.yy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            val += U.yy();
+        }
     }
     return val / (double) nint;
 }
@@ -604,9 +697,12 @@ double FELogElemRightStretchZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        val += U.zz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            val += U.zz();
+        }
     }
     return val / (double) nint;
 }
@@ -618,9 +714,12 @@ double FELogElemRightStretchXY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        val += U.xy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            val += U.xy();
+        }
     }
     return val / (double) nint;
 }
@@ -632,9 +731,12 @@ double FELogElemRightStretchYZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        val += U.yz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            val += U.yz();
+        }
     }
     return val / (double) nint;
 }
@@ -646,9 +748,12 @@ double FELogElemRightStretchXZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        val += U.xz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            val += U.xz();
+        }
     }
     return val / (double) nint;
 }
@@ -661,10 +766,13 @@ double FELogElemRightStretch1::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        U.exact_eigen(l);
-        val += l[0];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            U.exact_eigen(l);
+            val += l[0];
+        }
     }
     return val / (double) nint;
 }
@@ -677,10 +785,13 @@ double FELogElemRightStretch2::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        U.exact_eigen(l);
-        val += l[1];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            U.exact_eigen(l);
+            val += l[1];
+        }
     }
     return val / (double) nint;
 }
@@ -693,10 +804,13 @@ double FELogElemRightStretch3::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds U = pt.RightStretch();
-        U.exact_eigen(l);
-        val += l[2];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds U = pt->RightStretch();
+            U.exact_eigen(l);
+            val += l[2];
+        }
     }
     return val / (double) nint;
 }
@@ -709,11 +823,12 @@ double FELogElemRightStretchEffective::value(FEElement& el)
     for (int n = 0; n < nint; ++n)
     {
         FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-        FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
-        
-        mat3ds U = ep.RightStretch();
-        
-        Uavg += U;
+        FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+		if (ep)
+		{
+			mat3ds U = ep->RightStretch();
+			Uavg += U;
+		}
     }
     Uavg /= (double)nint;
     double val = Uavg.effective_norm();
@@ -728,9 +843,12 @@ double FELogElemLeftStretchX::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        val += V.xx();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            val += V.xx();
+        }
     }
     return val / (double) nint;
 }
@@ -742,9 +860,12 @@ double FELogElemLeftStretchY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        val += V.yy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            val += V.yy();
+        }
     }
     return val / (double) nint;
 }
@@ -756,9 +877,12 @@ double FELogElemLeftStretchZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        val += V.zz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            val += V.zz();
+        }
     }
     return val / (double) nint;
 }
@@ -770,9 +894,12 @@ double FELogElemLeftStretchXY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        val += V.xy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            val += V.xy();
+        }
     }
     return val / (double) nint;
 }
@@ -784,9 +911,12 @@ double FELogElemLeftStretchYZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        val += V.yz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            val += V.yz();
+        }
     }
     return val / (double) nint;
 }
@@ -798,9 +928,12 @@ double FELogElemLeftStretchXZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        val += V.xz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            val += V.xz();
+        }
     }
     return val / (double) nint;
 }
@@ -813,10 +946,13 @@ double FELogElemLeftStretch1::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        V.exact_eigen(l);
-        val += l[0];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            V.exact_eigen(l);
+            val += l[0];
+        }
     }
     return val / (double) nint;
 }
@@ -829,10 +965,13 @@ double FELogElemLeftStretch2::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        V.exact_eigen(l);
-        val += l[1];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            V.exact_eigen(l);
+            val += l[1];
+        }
     }
     return val / (double) nint;
 }
@@ -845,10 +984,13 @@ double FELogElemLeftStretch3::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds V = pt.LeftStretch();
-        V.exact_eigen(l);
-        val += l[2];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds V = pt->LeftStretch();
+            V.exact_eigen(l);
+            val += l[2];
+        }
     }
     return val / (double) nint;
 }
@@ -861,11 +1003,13 @@ double FELogElemLeftStretchEffective::value(FEElement& el)
     for (int n = 0; n < nint; ++n)
     {
         FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-        FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
-        
-        mat3ds V = ep.LeftStretch();
-        
-        Vavg += V;
+        FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+
+        if (ep)
+        {
+            mat3ds V = ep->LeftStretch();
+            Vavg += V;
+        }
     }
     Vavg /= (double)nint;
     double val = Vavg.effective_norm();
@@ -880,9 +1024,12 @@ double FELogElemRightHenckyX::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        val += H.xx();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            val += H.xx();
+        }
     }
     return val / (double) nint;
 }
@@ -894,9 +1041,12 @@ double FELogElemRightHenckyY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        val += H.yy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            val += H.yy();
+        }
     }
     return val / (double) nint;
 }
@@ -908,9 +1058,12 @@ double FELogElemRightHenckyZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        val += H.zz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            val += H.zz();
+        }
     }
     return val / (double) nint;
 }
@@ -922,9 +1075,12 @@ double FELogElemRightHenckyXY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        val += H.xy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            val += H.xy();
+        }
     }
     return val / (double) nint;
 }
@@ -936,9 +1092,12 @@ double FELogElemRightHenckyYZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        val += H.yz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            val += H.yz();
+        }
     }
     return val / (double) nint;
 }
@@ -950,9 +1109,12 @@ double FELogElemRightHenckyXZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        val += H.xz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            val += H.xz();
+        }
     }
     return val / (double) nint;
 }
@@ -965,10 +1127,13 @@ double FELogElemRightHencky1::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        H.exact_eigen(l);
-        val += l[0];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            H.exact_eigen(l);
+            val += l[0];
+        }
     }
     return val / (double) nint;
 }
@@ -981,10 +1146,13 @@ double FELogElemRightHencky2::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        H.exact_eigen(l);
-        val += l[1];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            H.exact_eigen(l);
+            val += l[1];
+        }
     }
     return val / (double) nint;
 }
@@ -997,10 +1165,13 @@ double FELogElemRightHencky3::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds H = pt.RightHencky();
-        H.exact_eigen(l);
-        val += l[2];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds H = pt->RightHencky();
+            H.exact_eigen(l);
+            val += l[2];
+        }
     }
     return val / (double) nint;
 }
@@ -1013,11 +1184,13 @@ double FELogElemRightHenckyEffective::value(FEElement& el)
     for (int n = 0; n < nint; ++n)
     {
         FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-        FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
-        
-        mat3ds H = ep.RightHencky();
-        
-        Havg += H;
+        FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+
+        if (ep)
+        {
+            mat3ds H = ep->RightHencky();
+            Havg += H;
+        }
     }
     Havg /= (double)nint;
     double val = Havg.effective_norm();
@@ -1032,9 +1205,12 @@ double FELogElemLeftHenckyX::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        val += h.xx();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            val += h.xx();
+        }
     }
     return val / (double) nint;
 }
@@ -1046,9 +1222,12 @@ double FELogElemLeftHenckyY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        val += h.yy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            val += h.yy();
+        }
     }
     return val / (double) nint;
 }
@@ -1060,9 +1239,12 @@ double FELogElemLeftHenckyZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        val += h.zz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            val += h.zz();
+        }
     }
     return val / (double) nint;
 }
@@ -1074,9 +1256,12 @@ double FELogElemLeftHenckyXY::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        val += h.xy();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            val += h.xy();
+        }
     }
     return val / (double) nint;
 }
@@ -1088,9 +1273,12 @@ double FELogElemLeftHenckyYZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        val += h.yz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            val += h.yz();
+        }
     }
     return val / (double) nint;
 }
@@ -1102,9 +1290,12 @@ double FELogElemLeftHenckyXZ::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        val += h.xz();
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            val += h.xz();
+        }
     }
     return val / (double) nint;
 }
@@ -1117,10 +1308,13 @@ double FELogElemLeftHencky1::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        h.exact_eigen(l);
-        val += l[0];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            h.exact_eigen(l);
+            val += l[0];
+        }
     }
     return val / (double) nint;
 }
@@ -1133,10 +1327,13 @@ double FELogElemLeftHencky2::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        h.exact_eigen(l);
-        val += l[1];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            h.exact_eigen(l);
+            val += l[1];
+        }
     }
     return val / (double) nint;
 }
@@ -1149,10 +1346,13 @@ double FELogElemLeftHencky3::value(FEElement& el)
     int nint = el.GaussPoints();
     for (int i=0; i<nint; ++i)
     {
-        FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-        mat3ds h = pt.LeftHencky();
-        h.exact_eigen(l);
-        val += l[2];
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3ds h = pt->LeftHencky();
+            h.exact_eigen(l);
+            val += l[2];
+        }
     }
     return val / (double) nint;
 }
@@ -1165,11 +1365,13 @@ double FELogElemLeftHenckyEffective::value(FEElement& el)
     for (int n = 0; n < nint; ++n)
     {
         FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-        FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
-        
-        mat3ds h = ep.LeftHencky();
-        
-        havg += h;
+        FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+
+        if (ep)
+        {
+            mat3ds h = ep->LeftHencky();
+            havg += h;
+        }
     }
     havg /= (double)nint;
     double val = havg.effective_norm();
@@ -1184,8 +1386,11 @@ double FELogElemStressX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_s.xx();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_s.xx();
+		}
 	}
 	return val / (double) nint;
 }
@@ -1197,8 +1402,11 @@ double FELogElemStressY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_s.yy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_s.yy();
+		}
 	}
 	return val / (double) nint;
 }
@@ -1210,8 +1418,11 @@ double FELogElemStressZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_s.zz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_s.zz();
+		}
 	}
 	return val / (double) nint;
 }
@@ -1223,8 +1434,11 @@ double FELogElemStressXY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_s.xy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_s.xy();
+		}
 	}
 	return val / (double) nint;
 }
@@ -1236,8 +1450,11 @@ double FELogElemStressYZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_s.yz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_s.yz();
+		}
 	}
 	return val / (double) nint;
 }
@@ -1249,8 +1466,11 @@ double FELogElemStressXZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_s.xz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_s.xz();
+		}
 	}
 	return val / (double) nint;
 }
@@ -1263,9 +1483,12 @@ double FELogElemStressEffective::value(FEElement& el)
 	for (int n = 0; n < nint; ++n)
 	{
 		FEMaterialPoint& mp = *el.GetMaterialPoint(n);
-		FEElasticMaterialPoint& ep = *mp.ExtractData<FEElasticMaterialPoint>();
+		FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
 
-		savg += ep.m_s;
+		if (ep)
+		{
+			savg += ep->m_s;
+		}
 	}
 	savg /= (double)nint;
 	double val = savg.effective_norm();
@@ -1282,9 +1505,12 @@ double FELogElemStress1::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		pt.m_s.exact_eigen(l);
-		val += l[0];
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			pt->m_s.exact_eigen(l);
+			val += l[0];
+		}
 	}
 	return val / (double) nint;
 }
@@ -1297,9 +1523,12 @@ double FELogElemStress2::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		pt.m_s.exact_eigen(l);
-		val += l[1];
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			pt->m_s.exact_eigen(l);
+			val += l[1];
+		}
 	}
 	return val / (double) nint;
 }
@@ -1312,9 +1541,12 @@ double FELogElemStress3::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		pt.m_s.exact_eigen(l);
-		val += l[2];
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			pt->m_s.exact_eigen(l);
+			val += l[2];
+		}
 	}
 	return val / (double) nint;
 }
@@ -1326,9 +1558,12 @@ double FELogElemPK2StressX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds S = pt.pull_back(pt.m_s);
-		val += S.xx();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds S = pt->pull_back(pt->m_s);
+			val += S.xx();
+		}
 	}
 	return val / (double)nint;
 }
@@ -1340,9 +1575,12 @@ double FELogElemPK2StressY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds S = pt.pull_back(pt.m_s);
-		val += S.yy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds S = pt->pull_back(pt->m_s);
+			val += S.yy();
+		}
 	}
 	return val / (double)nint;
 }
@@ -1354,9 +1592,12 @@ double FELogElemPK2StressZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds S = pt.pull_back(pt.m_s);
-		val += S.zz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds S = pt->pull_back(pt->m_s);
+			val += S.zz();
+		}
 	}
 	return val / (double)nint;
 }
@@ -1368,9 +1609,12 @@ double FELogElemPK2StressXY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds S = pt.pull_back(pt.m_s);
-		val += S.xy();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds S = pt->pull_back(pt->m_s);
+			val += S.xy();
+		}
 	}
 	return val / (double)nint;
 }
@@ -1382,9 +1626,12 @@ double FELogElemPK2StressYZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds S = pt.pull_back(pt.m_s);
-		val += S.yz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds S = pt->pull_back(pt->m_s);
+			val += S.yz();
+		}
 	}
 	return val / (double)nint;
 }
@@ -1396,11 +1643,167 @@ double FELogElemPK2StressXZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		mat3ds S = pt.pull_back(pt.m_s);
-		val += S.xz();
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3ds S = pt->pull_back(pt->m_s);
+			val += S.xz();
+		}
 	}
 	return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressXX::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(0,0);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressYY::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(1,1);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressZZ::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(2,2);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressXY::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(0,1);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressYZ::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(1,2);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressXZ::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(0,2);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressYX::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(1,0);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressZY::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(2,1);
+        }
+    }
+    return val / (double)nint;
+}
+
+//-----------------------------------------------------------------------------
+double FELogElemPK1StressZX::value(FEElement& el)
+{
+    double val = 0.0;
+    int nint = el.GaussPoints();
+    for (int i = 0; i < nint; ++i)
+    {
+        FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+        if (pt)
+        {
+            mat3d P = pt->m_J*pt->m_s*pt->m_F.transinv();
+            val += P(2,0);
+        }
+    }
+    return val / (double)nint;
 }
 
 //-----------------------------------------------------------------------------
@@ -1414,8 +1817,11 @@ double FELogElemStressEigenVector::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i = 0; i < nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		s += pt.m_s;
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			s += pt->m_s;
+		}
 	}
 	s /= (double)nint;
 
@@ -1443,8 +1849,11 @@ double FELogElemDeformationGradientXX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(0,0);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(0,0);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1456,8 +1865,11 @@ double FELogElemDeformationGradientXY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(0,1);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(0,1);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1469,8 +1881,11 @@ double FELogElemDeformationGradientXZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(0,2);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(0,2);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1482,8 +1897,11 @@ double FELogElemDeformationGradientYX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(1,0);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(1,0);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1495,8 +1913,11 @@ double FELogElemDeformationGradientYY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(1,1);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(1,1);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1508,8 +1929,11 @@ double FELogElemDeformationGradientYZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(1,2);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(1,2);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1521,8 +1945,11 @@ double FELogElemDeformationGradientZX::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(2,0);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(2,0);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1534,8 +1961,11 @@ double FELogElemDeformationGradientZY::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(2,1);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(2,1);
+		}
 	}
 	return val / (double) nint;
 }
@@ -1547,10 +1977,37 @@ double FELogElemDeformationGradientZZ::value(FEElement& el)
 	int nint = el.GaussPoints();
 	for (int i=0; i<nint; ++i)
 	{
-		FEElasticMaterialPoint& pt = *el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
-		val += pt.m_F(2,2);
+		FEElasticMaterialPoint* pt = el.GetMaterialPoint(i)->ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			val += pt->m_F(2,2);
+		}
 	}
 	return val / (double) nint;
+}
+
+double FELogTotalDeformationGradient::value(FEElement& el)
+{
+	double val = 0.0;
+	int nint = el.GaussPoints();
+	for (int i = 0; i < nint; ++i)
+	{
+		FEMaterialPoint& mp = *el.GetMaterialPoint(i);
+		FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			FEPrestrainMaterialPoint* pp = mp.ExtractData<FEPrestrainMaterialPoint>();
+			mat3d F = pt->m_F;
+			if (pp)
+			{
+				mat3d Fp = pp->prestrain();
+				F = F * Fp;
+			}
+
+			val += F(m_r, m_c);
+		}
+	}
+	return val / (double)nint;
 }
 
 //-----------------------------------------------------------------------------
@@ -1619,117 +2076,225 @@ double FELogElemFiberStretch::value(FEElement& el)
 	for (int j=0; j<n; ++j)
 	{
 		FEMaterialPoint& mp = *el.GetMaterialPoint(j);
-		FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
-		mat3d Q = mat->GetLocalCS(mp);
-		vec3d ri = Q.col(0);
-		vec3d r = pt.m_F*ri;
-
-		l += r.norm();
+		FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3d Q = mat->GetLocalCS(mp);
+			vec3d ri = Q.col(0);
+			vec3d r = pt->m_F * ri;
+			l += r.norm();
+		}
 	}
 	l /= (double) n;
 	return l;
 }
 
 //-----------------------------------------------------------------------------
-double FELogElemFiberVectorX::value(FEElement& el)
+double FELogElemFiberVector_::value(FEElement& el)
 {
 	int matID = el.GetMatID();
 	FEMaterial* mat = GetFEModel()->GetMaterial(matID);
+
+	FEElasticMaterial* pme = mat->ExtractProperty<FEElasticMaterial>();
+	if (pme == nullptr) return 0.0;
+
+	FEVec3dValuator* vec = dynamic_cast<FEVec3dValuator*>(pme->GetProperty("fiber"));
+	if (vec == nullptr) return 0.0;
 
 	int n = el.GaussPoints();
 	double l = 0.0;
 	for (int j = 0; j<n; ++j)
 	{
 		FEMaterialPoint& mp = *el.GetMaterialPoint(j);
-		FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
-		mat3d Q = mat->GetLocalCS(mp);
+	
+		const FEElasticMaterialPoint* pt = mp.ExtractData<const FEElasticMaterialPoint>();
+		if (pt)
+		{
+			mat3d Q = pme->GetLocalCS(mp);
+			mat3d F = pt->m_F;
+			vec3d a0 = vec->unitVector(mp);
+			vec3d ar = Q * a0;
+			vec3d a = F * ar; a.unit();
 
-		vec3d ri = Q.col(0);
-		vec3d r = pt.m_F*ri;
-
-		l += r.x;
+			switch (m_comp)
+			{
+			case 0: l += a.x; break;
+			case 1: l += a.y; break;
+			case 2: l += a.z; break;
+			}
+		}
 	}
 	l /= (double)n;
 	return l;
 }
 
 //-----------------------------------------------------------------------------
-double FELogElemFiberVectorY::value(FEElement& el)
+double FELogDamage_::value(FEElement& el)
 {
-	int matID = el.GetMatID();
-	FEMaterial* mat = GetFEModel()->GetMaterial(matID);
-
-	int n = el.GaussPoints();
-	double l = 0.0;
-	for (int j = 0; j<n; ++j)
+    int nint = el.GaussPoints();
+    double D = 0;
+	if (m_comp == -1)
 	{
-		FEMaterialPoint& mp = *el.GetMaterialPoint(j);
-		FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
-		mat3d Q = mat->GetLocalCS(mp);
-
-		vec3d ri = Q.col(0);
-		vec3d r = pt.m_F*ri;
-
-		l += r.y;
+		for (int j = 0; j < nint; ++j)
+		{
+			FEMaterialPoint& pt = *el.GetMaterialPoint(j);
+			FEReactiveMaterialPoint* ppd = pt.ExtractData<FEReactiveMaterialPoint>();
+			FEElasticMixtureMaterialPoint* pem = pt.ExtractData<FEElasticMixtureMaterialPoint>();
+			FEMultigenerationMaterialPoint* pmg = pt.ExtractData<FEMultigenerationMaterialPoint>();
+			if (ppd) D += (float)ppd->BrokenBonds();
+			else if (pem) {
+				for (int k = 0; k < pem->Components(); ++k)
+				{
+					FEReactiveMaterialPoint* ppd = pem->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+					if (ppd) D += (float)ppd->BrokenBonds();
+				}
+			}
+			else if (pmg) {
+				for (int k = 0; k < pmg->Components(); ++k)
+				{
+					FEReactiveMaterialPoint* ppd = pmg->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+					FEElasticMixtureMaterialPoint* pem = pmg->GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
+					if (ppd) D += (float)ppd->BrokenBonds();
+					else if (pem)
+					{
+						for (int l = 0; l < pem->Components(); ++l)
+						{
+							FEReactiveMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEReactiveMaterialPoint>();
+							if (ppd) D += (float)ppd->BrokenBonds();
+						}
+					}
+				}
+			}
+		}
 	}
-	l /= (double)n;
-	return l;
+	else
+	{
+		for (int n = 0; n < el.GaussPoints(); ++n)
+		{
+			FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+			FEElasticMixtureMaterialPoint* mmp = mp.ExtractData< FEElasticMixtureMaterialPoint>();
+			if (mmp && (m_comp < mmp->Components()))
+			{
+				FEReactiveMaterialPoint* dp = mmp->GetPointData(m_comp)->ExtractData<FEReactiveMaterialPoint>();
+				if (dp) D += dp->BrokenBonds();
+			}
+		}
+	}
+    D /= (double) nint;
+    return D;
 }
 
 //-----------------------------------------------------------------------------
-double FELogElemFiberVectorZ::value(FEElement& el)
-{
-	int matID = el.GetMatID();
-	FEMaterial* mat = GetFEModel()->GetMaterial(matID);
-
-	int n = el.GaussPoints();
-	double l = 0.0;
-	for (int j = 0; j<n; ++j)
-	{
-		FEMaterialPoint& mp = *el.GetMaterialPoint(j);
-		FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
-		mat3d Q = mat->GetLocalCS(mp);
-
-		vec3d ri = Q.col(0);
-		vec3d r = pt.m_F*ri;
-
-		l += r.z;
-	}
-	l /= (double)n;
-	return l;
-}
-
-//-----------------------------------------------------------------------------
-double FELogDamage::value(FEElement& el)
+double FELogIntactBonds::value(FEElement& el)
 {
     int nint = el.GaussPoints();
     double D = 0;
     for (int j=0; j<nint; ++j)
     {
         FEMaterialPoint& pt = *el.GetMaterialPoint(j);
-        FEDamageMaterialPoint* ppd = pt.ExtractData<FEDamageMaterialPoint>();
+        FEReactiveMaterialPoint* ppd = pt.ExtractData<FEReactiveMaterialPoint>();
         FEElasticMixtureMaterialPoint* pem = pt.ExtractData<FEElasticMixtureMaterialPoint>();
         FEMultigenerationMaterialPoint* pmg = pt.ExtractData<FEMultigenerationMaterialPoint>();
-        if (ppd) D += (float) ppd->m_D;
+        if (ppd) D += (float) ppd->IntactBonds();
         else if (pem) {
             for (int k=0; k<pem->Components(); ++k)
             {
-                FEDamageMaterialPoint* ppd = pem->GetPointData(k)->ExtractData<FEDamageMaterialPoint>();
-                if (ppd) D += (float) ppd->m_D;
+                FEReactiveMaterialPoint* ppd = pem->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+                if (ppd) D += (float) ppd->IntactBonds();
             }
         }
         else if (pmg) {
             for (int k=0; k<pmg->Components(); ++k)
             {
-                FEDamageMaterialPoint* ppd = pt.GetPointData(k)->ExtractData<FEDamageMaterialPoint>();
-                FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
-                if (ppd) D += (float) ppd->m_D;
+                FEReactiveMaterialPoint* ppd = pmg->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+                FEElasticMixtureMaterialPoint* pem = pmg->GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
+                if (ppd) D += (float) ppd->IntactBonds();
                 else if (pem)
                 {
                     for (int l=0; l<pem->Components(); ++l)
                     {
-                        FEDamageMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEDamageMaterialPoint>();
-                        if (ppd) D += (float) ppd->m_D;
+                        FEReactiveMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEReactiveMaterialPoint>();
+                        if (ppd) D += (float) ppd->IntactBonds();
+                    }
+                }
+            }
+        }
+    }
+    D /= (double) nint;
+    return D;
+}
+
+//-----------------------------------------------------------------------------
+double FELogYieldedBonds::value(FEElement& el)
+{
+    int nint = el.GaussPoints();
+    double D = 0;
+    for (int j=0; j<nint; ++j)
+    {
+        FEMaterialPoint& pt = *el.GetMaterialPoint(j);
+        FEReactiveMaterialPoint* ppd = pt.ExtractData<FEReactiveMaterialPoint>();
+        FEElasticMixtureMaterialPoint* pem = pt.ExtractData<FEElasticMixtureMaterialPoint>();
+        FEMultigenerationMaterialPoint* pmg = pt.ExtractData<FEMultigenerationMaterialPoint>();
+        if (ppd) D += (float) ppd->YieldedBonds();
+        else if (pem) {
+            for (int k=0; k<pem->Components(); ++k)
+            {
+                FEReactiveMaterialPoint* ppd = pem->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+                if (ppd) D += (float) ppd->YieldedBonds();
+            }
+        }
+        else if (pmg) {
+            for (int k=0; k<pmg->Components(); ++k)
+            {
+                FEReactiveMaterialPoint* ppd = pmg->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+                FEElasticMixtureMaterialPoint* pem = pmg->GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
+                if (ppd) D += (float) ppd->YieldedBonds();
+                else if (pem)
+                {
+                    for (int l=0; l<pem->Components(); ++l)
+                    {
+                        FEReactiveMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEReactiveMaterialPoint>();
+                        if (ppd) D += (float) ppd->YieldedBonds();
+                    }
+                }
+            }
+        }
+    }
+    D /= (double) nint;
+    return D;
+}
+
+//-----------------------------------------------------------------------------
+double FELogFatigueBonds::value(FEElement& el)
+{
+    int nint = el.GaussPoints();
+    double D = 0;
+    for (int j=0; j<nint; ++j)
+    {
+        FEMaterialPoint& pt = *el.GetMaterialPoint(j);
+        FEReactiveMaterialPoint* ppd = pt.ExtractData<FEReactiveMaterialPoint>();
+        FEElasticMixtureMaterialPoint* pem = pt.ExtractData<FEElasticMixtureMaterialPoint>();
+        FEMultigenerationMaterialPoint* pmg = pt.ExtractData<FEMultigenerationMaterialPoint>();
+        if (ppd) D += (float) ppd->FatigueBonds();
+        else if (pem) {
+            for (int k=0; k<pem->Components(); ++k)
+            {
+                FEReactiveMaterialPoint* ppd = pem->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+                if (ppd) D += (float) ppd->FatigueBonds();
+            }
+        }
+        else if (pmg) {
+            for (int k=0; k<pmg->Components(); ++k)
+            {
+                FEReactiveMaterialPoint* ppd = pmg->GetPointData(k)->ExtractData<FEReactiveMaterialPoint>();
+                FEElasticMixtureMaterialPoint* pem = pmg->GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
+                if (ppd) D += (float) ppd->FatigueBonds();
+                else if (pem)
+                {
+                    for (int l=0; l<pem->Components(); ++l)
+                    {
+                        FEReactiveMaterialPoint* ppd = pem->GetPointData(l)->ExtractData<FEReactiveMaterialPoint>();
+                        if (ppd) D += (float) ppd->FatigueBonds();
                     }
                 }
             }
@@ -1767,7 +2332,7 @@ double FELogOctahedralPlasticStrain::value(FEElement& el)
             {
                 FEReactivePlasticityMaterialPoint* prp = pt.ExtractData<FEReactivePlasticityMaterialPoint>();
                 FEReactivePlasticDamageMaterialPoint* prd = pt.ExtractData<FEReactivePlasticDamageMaterialPoint>();
-                FEElasticMixtureMaterialPoint* pem = pt.GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
+                FEElasticMixtureMaterialPoint* pem = pmg->GetPointData(k)->ExtractData<FEElasticMixtureMaterialPoint>();
                 if (prp) D += (float) prp->m_gp[0];
                 else if (prd) D += (float) prd->m_gp[0];
                 else if (pem)
@@ -1839,24 +2404,25 @@ double FELogDiscreteElementForce::value(FEElement& el)
 	FEDiscreteElement& del = dynamic_cast<FEDiscreteElement&>(el);
 	FEMesh& mesh = GetFEModel()->GetMesh();
 
-	// get the (one) material point data
-	FEDiscreteElasticMaterialPoint& mp = dynamic_cast<FEDiscreteElasticMaterialPoint&>(*el.GetMaterialPoint(0));
-
 	vec3d ra1 = mesh.Node(del.m_node[0]).m_rt;
 	vec3d rb1 = mesh.Node(del.m_node[1]).m_rt;
 	vec3d e = rb1 - ra1; e.unit();
 
-	vec3d F = mp.m_Ft;
-
-	double Fm = F * e;
-
-	return Fm;
+	FEDiscreteElasticMaterialPoint* mp = el.GetMaterialPoint(0)->ExtractData<FEDiscreteElasticMaterialPoint>();
+	assert(mp);
+	if (mp)
+	{
+		vec3d F = mp->m_Ft;
+		double Fm = F * e;
+		return Fm;
+	}
+	else return 0.0;
 }
 
 //-----------------------------------------------------------------------------
 double FELogDiscreteElementForceX::value(FEElement& el)
 {
-	FEDiscreteElasticMaterialPoint* mp = dynamic_cast<FEDiscreteElasticMaterialPoint*>(el.GetMaterialPoint(0));
+	FEDiscreteElasticMaterialPoint* mp = el.GetMaterialPoint(0)->ExtractData<FEDiscreteElasticMaterialPoint>();
 	if (mp) return mp->m_Ft.x;
 	else return 0.0;
 }
@@ -1891,16 +2457,18 @@ double FELogElementMixtureStress::value(FEElement& el)
 		{
 			if (m_comp < mmp->Components())
 			{
-				FEElasticMaterialPoint& ep = *mmp->GetPointData(m_comp)->ExtractData<FEElasticMaterialPoint>();
-
-				switch (m_metric)
+				FEElasticMaterialPoint* ep = mmp->GetPointData(m_comp)->ExtractData<FEElasticMaterialPoint>();
+				if (ep)
 				{
-				case 0: s += ep.m_s.xx(); break;
-				case 1: s += ep.m_s.xy(); break;
-				case 2: s += ep.m_s.yy(); break;
-				case 3: s += ep.m_s.xz(); break;
-				case 4: s += ep.m_s.yz(); break;
-				case 5: s += ep.m_s.zz(); break;
+					switch (m_metric)
+					{
+					case 0: s += ep->m_s.xx(); break;
+					case 1: s += ep->m_s.xy(); break;
+					case 2: s += ep->m_s.yy(); break;
+					case 3: s += ep->m_s.xz(); break;
+					case 4: s += ep->m_s.yz(); break;
+					case 5: s += ep->m_s.zz(); break;
+					}
 				}
 			}
 		}
@@ -1920,6 +2488,11 @@ double FELogRigidBodyR23::value(FERigidBody& rb) { return (rb.GetRotation().Rota
 double FELogRigidBodyR31::value(FERigidBody& rb) { return (rb.GetRotation().RotationMatrix()(2, 0)); }
 double FELogRigidBodyR32::value(FERigidBody& rb) { return (rb.GetRotation().RotationMatrix()(2, 1)); }
 double FELogRigidBodyR33::value(FERigidBody& rb) { return (rb.GetRotation().RotationMatrix()(2, 2)); }
+
+//-----------------------------------------------------------------------------
+double FELogRigidBodyEulerX::value(FERigidBody& rb) { double x, y, z; rb.GetRotation().GetEuler(x, y, z); return x; }
+double FELogRigidBodyEulerY::value(FERigidBody& rb) { double x, y, z; rb.GetRotation().GetEuler(x, y, z); return y; }
+double FELogRigidBodyEulerZ::value(FERigidBody& rb) { double x, y, z; rb.GetRotation().GetEuler(x, y, z); return z; }
 
 //-----------------------------------------------------------------------------
 double FELogRigidBodyPosX::value(FERigidBody& rb) { return rb.m_rt.x; }
@@ -1971,6 +2544,157 @@ double FELogRigidBodyTorqueZ::value(FERigidBody& rb) { return rb.m_Mr.z; }
 double FELogRigidBodyKineticEnergy::value(FERigidBody& rb) {
     FERigidBody&rbl = static_cast<FERigidBody&>(rb);
     return (rbl.m_mass*(rbl.m_vt*rbl.m_vt) + rbl.m_wt*(rbl.m_moi*rbl.m_wt))/2;
+}
+//-----------------------------------------------------------------------------
+double FELogRigidBodyIHAwx::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return omega.x; }
+double FELogRigidBodyIHAwy::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return omega.y; }
+double FELogRigidBodyIHAwz::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return omega.z; }
+double FELogRigidBodyIHAwm::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return omega.norm() * 180 / PI; }
+double FELogRigidBodyIHAsx::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return s.x; }
+double FELogRigidBodyIHAsy::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return s.y; }
+double FELogRigidBodyIHAsz::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return s.z; }
+double FELogRigidBodyIHAtd::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.InstantaneousHelicalAxis(omega, s, tdot); return tdot; }
+
+//-----------------------------------------------------------------------------
+double FELogRigidBodyFHAwx::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return omega.x; }
+double FELogRigidBodyFHAwy::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return omega.y; }
+double FELogRigidBodyFHAwz::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return omega.z; }
+double FELogRigidBodyFHAwm::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return omega.norm()*180/PI; }
+double FELogRigidBodyFHAsx::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return s.x; }
+double FELogRigidBodyFHAsy::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return s.y; }
+double FELogRigidBodyFHAsz::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return s.z; }
+double FELogRigidBodyFHAtd::value(FERigidBody& rb) { vec3d omega; vec3d s; double tdot; rb.FiniteHelicalAxis(omega, s, tdot); return tdot; }
+
+//-----------------------------------------------------------------------------
+double FELogRigidConnectorIHAwx::value(FENLConstraint& rc) {
+    vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return omega.x;
+}
+double FELogRigidConnectorIHAwy::value(FENLConstraint& rc) {
+    vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return omega.y;
+}
+double FELogRigidConnectorIHAwz::value(FENLConstraint& rc) {
+    vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return omega.z;
+}
+double FELogRigidConnectorIHAwm::value(FENLConstraint& rc) {
+    vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return omega.norm()*180/PI;
+}
+double FELogRigidConnectorIHAsx::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return s.x;
+}
+double FELogRigidConnectorIHAsy::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return s.y;
+}
+double FELogRigidConnectorIHAsz::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return s.z;
+}
+double FELogRigidConnectorIHAtd::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->InstantaneousHelicalAxis(omega, s, tdot);
+    return tdot;
+}
+
+//-----------------------------------------------------------------------------
+double FELogRigidConnectorFHAwx::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return omega.x;
+}
+double FELogRigidConnectorFHAwy::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return omega.y;
+}
+double FELogRigidConnectorFHAwz::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return omega.z;
+}
+double FELogRigidConnectorFHAwm::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return omega.norm()*180/PI;
+}
+double FELogRigidConnectorFHAsx::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return s.x;
+}
+double FELogRigidConnectorFHAsy::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return s.y;
+}
+double FELogRigidConnectorFHAsz::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return s.z;
+}
+double FELogRigidConnectorFHAtd::value(FENLConstraint& rc) {
+	vec3d omega;
+    vec3d s;
+    double tdot;
+    FERigidConnector* prc = dynamic_cast<FERigidConnector*>(&rc);
+    prc->FiniteHelicalAxis(omega, s, tdot);
+    return tdot;
 }
 
 //-----------------------------------------------------------------------------
@@ -2053,14 +2777,14 @@ double FELogRigidConnectorRotationZ::value(FENLConstraint& rc)
 double FELogVolumeConstraint::value(FENLConstraint& rc)
 {
     FEVolumeConstraint* prc = dynamic_cast<FEVolumeConstraint*>(&rc);
-    return (prc ? prc->m_s.m_Vt : 0);
+    return (prc ? prc->EnclosedVolume() : 0);
 }
 
 //-----------------------------------------------------------------------------
 double FELogVolumePressure::value(FENLConstraint& rc)
 {
     FEVolumeConstraint* prc = dynamic_cast<FEVolumeConstraint*>(&rc);
-    return (prc ? prc->m_s.m_p : 0);
+    return (prc ? prc->Pressure() : 0);
 }
 
 //=============================================================================
@@ -2078,4 +2802,123 @@ double FELogContactArea::value(FESurface& surface)
 		return area;
 	}
 	return 0.0;
+}
+
+double FELogMaxContactGap::value(FESurface& surface)
+{
+	FEContactSurface* pcs = dynamic_cast<FEContactSurface*>(&surface);
+	if (pcs == 0) return 0.0;
+
+	// make sure the corresponding contact interface is active
+	// (in case the parent was not set, we'll proceed regardless)
+	FEContactInterface* pci = pcs->GetContactInterface(); assert(pci);
+	if ((pci == 0) || pci->IsActive())
+	{
+		double maxGap = 0;
+		for (int i = 0; i < pcs->Elements(); ++i)
+		{
+			FESurfaceElement& el = pcs->Element(i);
+			for (int n = 0; n < el.GaussPoints(); ++n)
+			{
+				FEContactMaterialPoint* pt = dynamic_cast<FEContactMaterialPoint*>(el.GetMaterialPoint(n));
+				if (pt)
+				{
+					if (pt->m_gap > maxGap) maxGap = pt->m_gap;
+				}
+			}
+		}
+		return maxGap;
+	}
+	return 0.0;
+}
+
+double FENormalizedInternalEnergy::value(FEDomain& dom)
+{
+	double sum = 0.0;
+	double vol = 0.0;
+	FESolidDomain* solidDomain = dynamic_cast<FESolidDomain*>(&dom);
+	if (solidDomain == nullptr) return 0.0;
+
+	FEModel* fem = GetFEModel();
+	const FETimeInfo& ti = fem->GetTime();
+	double dt = ti.timeIncrement;
+
+	double P0 = fem->GetGlobalConstant("P");
+	if (P0 == 0.0) P0 = 1.0;
+
+	int NE = solidDomain->Elements();
+	for (int i = 0; i < NE; ++i)
+	{
+		FESolidElement& el = solidDomain->Element(i);
+		double Ve = solidDomain->Volume(el);
+		vol += Ve;
+
+		mat3ds s(0), D(0);
+		int nint = el.GaussPoints();
+		double* gw = el.GaussWeights();
+		double w = 0.0;
+		for (int n = 0; n < nint; ++n)
+		{
+			FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+			FEElasticMaterialPoint* ep = mp.ExtractData<FEElasticMaterialPoint>();
+			if (ep)
+			{
+				s += ep->m_s * gw[n];
+				D += ep->RateOfDeformation();
+			}
+			w += gw[n];
+
+		}
+		s /= w;
+		D /= w;
+
+		double We = s.dotdot(D);
+
+		sum += We * dt * Ve;
+	}
+	m_sum += sum;
+	double NTSIE = m_sum / (P0 * vol);
+	return NTSIE;
+}
+
+double FELogTotalEnergy::value(FEDomain& dom)
+{
+	m_sum = 0.0;
+	if (dom.Class() == FE_DOMAIN_SOLID)
+	{
+		FEElasticMaterial* pme = dom.GetMaterial()->ExtractProperty<FEElasticMaterial>();
+		if (pme == 0) return false;
+
+		double E = 0.0;
+		FESolidDomain& solidDomain = dynamic_cast<FESolidDomain&>(dom);
+		for (int i = 0; i < solidDomain.Elements(); ++i)
+		{
+			FESolidElement& el = solidDomain.Element(i);
+			int nint = el.GaussPoints();
+			double* w = el.GaussWeights();
+			for (int n = 0; n < nint; ++n)
+			{
+				FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+				FEElasticMaterialPoint* pt = mp.ExtractData<FEElasticMaterialPoint>();
+
+				if (pt)
+				{
+					// strain energy
+					double W = pme->StrainEnergyDensity(mp);
+
+					// kinetic energy
+					double D = pme->Density(mp);
+					vec3d& v = pt->m_v;
+					double K = 0.5 * (v * v) * D;
+
+					double J0 = solidDomain.detJ0(el, n);
+
+					E += (K + W) * J0 * w[n];
+				}
+			}
+		}
+		m_sum = E;
+	}
+
+	return m_sum;
 }

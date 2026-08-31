@@ -31,6 +31,7 @@ SOFTWARE.*/
 #include "febiolib_api.h"
 #include "FEBioModel.h"
 #include "FEBioConfig.h"
+#include "cmdoptions.h"
 #include <ostream>
 
 class CompactMatrix;
@@ -53,7 +54,13 @@ namespace febio
 	FEBIOLIB_API bool ImportPlugin(const char* szfile);
 
 	// load all the plugins in a folder
-	FEBIOLIB_API void ImportPluginFolder(const char* szfolder);
+	FEBIOLIB_API bool ImportPluginFolder(const char* szfolder);
+
+    // load the plugins as defined in the repo's XML file
+	FEBIOLIB_API void ImportRepoPlugins(const char* szxmlFile);
+
+	// get the name of the plugin from its allocator Id
+	FEBIOLIB_API const char* GetPluginName(int allocId);
 
 	// call this to clean up all FEBio data
 	FEBIOLIB_API void FinishLibrary();
@@ -70,6 +77,9 @@ namespace febio
 	// run an FEBioModel
 	FEBIOLIB_API bool SolveModel(FEBioModel& fem, const char* sztask = nullptr, const char* szctrl = nullptr);
 
+	// run an FEBioModel
+	FEBIOLIB_API int RunModel(FEBioModel& fem, CMDOPTIONS* ops);
+
 	// write a matrix to file
 	FEBIOLIB_API bool write_hb(CompactMatrix& K, const char* szfile, int mode = 0);
 
@@ -78,4 +88,7 @@ namespace febio
 
 	// write a vector to file
 	FEBIOLIB_API bool write_vector(const vector<double>& a, const char* szfile, int mode = 0);
+
+	// run a material test
+	FEBIOLIB_API bool RunMaterialTest(FEMaterial* mat, double simtime, int steps, double strain, const char* sztest, std::vector<pair<double, double> >& out);
 }

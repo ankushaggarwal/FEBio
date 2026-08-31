@@ -28,9 +28,9 @@ SOFTWARE.*/
 
 #pragma once
 #include "FEDomain.h"
-#include "FEModel.h"
 #include "FEDofList.h"
 #include "FELinearSystem.h"
+#include "FESolidElement.h"
 
 //-----------------------------------------------------------------------------
 // This typedef defines a surface integrand. 
@@ -46,6 +46,9 @@ typedef std::function<void(FEMaterialPoint& mp, int node_a, int node_b, matrix& 
 //! abstract base class for 3D volumetric elements
 class FECORE_API FESolidDomain : public FEDomain
 {
+    FECORE_SUPER_CLASS(FESOLIDDOMAIN_ID)
+    FECORE_BASE_CLASS(FESolidDomain)
+
 public:
     //! constructor
     FESolidDomain(FEModel* pfem);
@@ -234,6 +237,8 @@ public:
     
     //! calculate spatial gradient of shapefunctions at integration point in reference frame (returns Jacobian determinant)
     double ShapeGradient0(FESolidElement& el, int n, vec3d* GradH);
+
+	double ShapeGradient0(FESolidElement& el, int order, int n, vec3d* GradH);
     
     //! calculate spatial gradient of shapefunctions at integration point (returns Jacobian determinant)
     double ShapeGradient(FESolidElement& el, double r, double s, double t, vec3d* GradH);
@@ -260,7 +265,7 @@ public:
 
 public:
 	//! loop over elements
-	void ForEachSolidElement(std::function<void(FESolidElement& el)> f);
+	void ForEachSolidElement(std::function<void(FESolidElement& el)> f, bool runInParallel = true);
 
 	//! return the degrees of freedom of an element for this domain
 	virtual int GetElementDofs(FESolidElement& el);
@@ -287,4 +292,6 @@ protected:
 
 	FEDofList	m_dofU;
 	FEDofList	m_dofSU;
+
+	DECLARE_FECORE_CLASS();
 };

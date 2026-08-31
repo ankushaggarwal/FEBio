@@ -34,7 +34,6 @@ SOFTWARE.*/
 #include <FECore/FEDomain.h>
 #include "RigidBC.h"
 #include <FECore/FEGlobalMatrix.h>
-#include "FERigidSurface.h"
 #include "FERigidMaterial.h"
 
 //-----------------------------------------------------------------------------
@@ -80,11 +79,8 @@ FERigidBody* FERigidSystem::Object(int i)
 void FERigidSystem::Clear()
 {
 	for (int i=0; i<(int)m_RB.size (); ++i) delete m_RB [i]; m_RB.clear ();
-	for (int i=0; i<(int)m_RN.size (); ++i) delete m_RN [i]; m_RN.clear ();
 	for (int i=0; i<(int)m_RBC.size(); ++i) delete m_RBC[i]; m_RBC.clear();
-	for (int i=0; i<(int)m_RDC.size(); ++i) delete m_RDC[i]; m_RDC.clear();
 	for (int i=0; i<(int)m_RIC.size(); ++i) delete m_RIC[i]; m_RIC.clear();
-	for (int i=0; i<(int)m_RS.size (); ++i) delete m_RS [i]; m_RS.clear ();
 }
 
 //-----------------------------------------------------------------------------
@@ -98,26 +94,27 @@ void FERigidSystem::Serialize(DumpStream& ar)
 	{
 		if (ar.IsSaving())
 		{
-			// rigid objects
-			int nrb = Objects();
-			ar << nrb;
-			for (int i=0; i<nrb; ++i) Object(i)->Serialize(ar);
-
-			// rigid nodes
-			ar & m_RN;
-
-			// fixed rigid body dofs
-			ar & m_RBC;
-
-			// rigid body displacements
-			ar & m_RDC;
+			// rigid body constraints
+			ar << m_RBC;
 
 			// rigid body initial conditions
-			ar & m_RIC;
+			ar << m_RIC;
+
+			// rigid objects
+			// (Do these last, since they contain references to rbcs)
+			int nrb = Objects();
+			ar << nrb;
+			for (int i = 0; i < nrb; ++i) m_RB[i]->Serialize(ar);
 		}
 		else
 		{
 			Clear();
+
+			// rigid body constraints
+			ar >> m_RBC;
+
+			// rigid body initial conditions
+			ar >> m_RIC;
 
 			// rigid bodies
 			int nrb = 0;
@@ -128,18 +125,6 @@ void FERigidSystem::Serialize(DumpStream& ar)
 				prb->Serialize(ar);
 				AddRigidBody(prb);
 			}
-
-			// rigid nodes
-			ar & m_RN;
-
-			// fixed rigid body dofs
-			ar & m_RBC;
-
-			// rigid body displacements
-			ar & m_RDC;
-
-			// rigid body initial conditions
-			ar & m_RIC;
 		}
 	}
 }
@@ -147,24 +132,10 @@ void FERigidSystem::Serialize(DumpStream& ar)
 //-----------------------------------------------------------------------------
 void FERigidSystem::Activate()
 {
-	// rigid nodes
-	for (int i=0; i<(int) m_RN.size(); ++i)
-	{
-		FERigidNodeSet& rn = *m_RN[i];
-		if (rn.IsActive()) rn.Activate();
-	}
-
-	// rigid body displacements
-	for (int i=0; i<(int) m_RDC.size(); ++i)
-	{
-		FERigidBodyDisplacement& rc = *m_RDC[i];
-		if (rc.IsActive()) rc.Activate();
-	}
-
 	// fixed rigid body dofs
 	for (int i=0; i<(int) m_RBC.size(); ++i)
 	{
-		FERigidBodyFixedBC& rc = *m_RBC[i];
+		FERigidBC& rc = *m_RBC[i];
 		if (rc.IsActive()) rc.Activate();
 	}
 
@@ -188,25 +159,49 @@ bool FERigidSystem::Init()
 	FEModel& fem = m_fem;
 	for (int i=0; i<(int) m_RBC.size(); ++i)
 	{
-		FERigidBodyFixedBC& BC = *m_RBC[i];
+		FERigidBC& BC = *m_RBC[i];
 		if (BC.Init() == false) return false;
-	}
-	for (int i=0; i<(int) m_RDC.size(); ++i)
-	{
-		FERigidBodyDisplacement& DC = *m_RDC[i];
-		if (DC.Init() == false) return false;
 	}
 	for (int i=0; i<(int) m_RIC.size(); ++i)
 	{
 		FERigidIC& IC = *m_RIC[i];
 		if (IC.Init() == false) return false;
 	}
-	// assign correct rigid body ID's to rigid nodes
-	for (int i = 0; i<(int)m_RN.size(); ++i)
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FERigidSystem::InitRigidBodies()
+{
+	FEModel& fem = m_fem;
+
+	// initialize rigid body COM
+	// only set the rigid body com if this is the main rigid body material
+	for (int i = 0; i < m_RB.size(); ++i)
 	{
-		FERigidNodeSet& rn = *m_RN[i];
-		if (rn.Init() == false) return false;
+		FERigidBody& rb = *m_RB[i];
+
+		// first, calculate the mass
+		rb.UpdateMass();
+
+		FERigidMaterial* prm = dynamic_cast<FERigidMaterial*>(fem.GetMaterial(rb.m_mat));
+		assert(prm);
+
+		// next, calculate the center of mass, or just set it
+		if (prm->m_com == false)
+		{
+			rb.UpdateCOM();
+		}
+		else
+		{
+			rb.SetCOM(prm->m_rc);
+		}
+
+		// finally, determine moi
+		rb.UpdateMOI();
 	}
+
 	return true;
 }
 
@@ -249,20 +244,50 @@ bool FERigidSystem::CreateObjects()
 
 	// Next, we assign to all nodes a rigid node number
 	// This number is preliminary since rigid materials can be merged
+	// Note that we do solid domains first. This is to avoid a complication
+	// with shells on solids.
+
+	// solid domains first
 	for (int nd = 0; nd < mesh.Domains(); ++nd)
 	{
 		FEDomain& dom = mesh.Domain(nd);
-		FERigidMaterial* pmat = dynamic_cast<FERigidMaterial*>(dom.GetMaterial());
-		if (pmat)
+		if (dom.Class() == FE_DOMAIN_SOLID)
 		{
-			for (int i=0; i<dom.Elements(); ++i)
+			FERigidMaterial* pmat = dynamic_cast<FERigidMaterial*>(dom.GetMaterial());
+			if (pmat)
 			{
-				FEElement& el = dom.ElementRef(i);
-				for (int j=0; j<el.Nodes(); ++j)
+				for (int i = 0; i < dom.Elements(); ++i)
 				{
-					int n = el.m_node[j];
-					FENode& node = mesh.Node(n);
-					node.m_rid = pmat->GetID() - 1;
+					FEElement& el = dom.ElementRef(i);
+					for (int j = 0; j < el.Nodes(); ++j)
+					{
+						int n = el.m_node[j];
+						FENode& node = mesh.Node(n);
+						node.m_rid = pmat->GetID() - 1;
+					}
+				}
+			}
+		}
+	}
+
+	// non-solid domains
+	for (int nd = 0; nd < mesh.Domains(); ++nd)
+	{
+		FEDomain& dom = mesh.Domain(nd);
+		if (dom.Class() != FE_DOMAIN_SOLID)
+		{
+			FERigidMaterial* pmat = dynamic_cast<FERigidMaterial*>(dom.GetMaterial());
+			if (pmat)
+			{
+				for (int i = 0; i < dom.Elements(); ++i)
+				{
+					FEElement& el = dom.ElementRef(i);
+					for (int j = 0; j < el.Nodes(); ++j)
+					{
+						int n = el.m_node[j];
+						FENode& node = mesh.Node(n);
+						node.m_rid = pmat->GetID() - 1;
+					}
 				}
 			}
 		}
@@ -333,6 +358,7 @@ bool FERigidSystem::CreateObjects()
 		if (node.m_rid >= 0) 
 		{
 			node.m_rid = mrb[ node.m_rid ];
+			node.m_ra = node.m_r0;
 		}
 	}
 
@@ -454,23 +480,17 @@ FEParamValue FERigidSystem::GetParameterValue(const ParamString& paramString)
 void FERigidSystem::UpdateMesh()
 {
 	FEMesh& mesh = m_fem.GetMesh();
-	int NRB = Objects();
-	for (int i=0; i<NRB; ++i)
+	int N = mesh.Nodes();
+#pragma omp parallel for
+	for (int i = 0; i < N; ++i)
 	{
-		// get the rigid body
-		FERigidBody& RB = *Object(i);
-
-		// update the mesh' nodes
-		int N = mesh.Nodes();
-		for (int i=0; i<N; ++i)
+		FENode& node = mesh.Node(i);
+		if (node.m_rid >= 0)
 		{
-			FENode& node = mesh.Node(i);
-			if (node.m_rid == RB.m_nID)
-			{
-				vec3d a0 = node.m_r0 - RB.m_r0;
-				vec3d at = RB.GetRotation()*a0;
-				node.m_rt = RB.m_rt + at;
-			}
+			FERigidBody& RB = *Object(node.m_rid);
+			vec3d a0 = node.m_ra - RB.m_r0;
+			vec3d at = RB.GetRotation()*a0;
+			node.m_rt = RB.m_rt + at;
 		}
 	}
 }
@@ -489,21 +509,4 @@ void FERigidSystem::BuildMatrixProfile(FEGlobalMatrix& G)
 			G.build_add(lm);
 		}
 	}
-}
-
-//-----------------------------------------------------------------------------
-void FERigidSystem::AddRigidSurface(FERigidSurface* rs)
-{
-	m_RS.push_back(rs);
-}
-
-//-----------------------------------------------------------------------------
-FERigidSurface* FERigidSystem::FindRigidSurface(const std::string& name)
-{
-	for (size_t i=0; i<m_RS.size(); ++i)
-	{
-		FERigidSurface* rs = m_RS[i];
-		if (name == rs->GetName()) return rs;
-	}
-	return 0;
 }

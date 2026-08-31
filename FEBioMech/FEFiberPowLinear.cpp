@@ -31,20 +31,24 @@ SOFTWARE.*/
 #include "FEFiberPowLinear.h"
 
 // define the material parameters
-BEGIN_FECORE_CLASS(FEFiberPowLinear, FEElasticFiberMaterial)
-    ADD_PARAMETER(m_E    , FE_RANGE_GREATER(0.0), "E"    );
-    ADD_PARAMETER(m_lam0 , FE_RANGE_GREATER(1.0), "lam0" );
-    ADD_PARAMETER(m_beta , FE_RANGE_GREATER_OR_EQUAL(2.0), "beta" );
-	ADD_PARAMETER(m_epsf, "epsilon_scale");
+BEGIN_FECORE_CLASS(FEFiberPowLinear, FEFiberMaterial)
+    ADD_PARAMETER(m_E    , FE_RANGE_GREATER(0.0), "E"    )->setUnits(UNIT_PRESSURE)->setLongName("fiber modulus E");
+    ADD_PARAMETER(m_lam0 , FE_RANGE_GREATER(1.0), "lam0" )->setLongName("toe stretch ratio");
+    ADD_PARAMETER(m_beta , FE_RANGE_GREATER_OR_EQUAL(2.0), "beta" )->setLongName("toe power exponent");
+	ADD_PARAMETER(m_tension_only, "tension_only");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
 // FEFiberPowLinear
 //-----------------------------------------------------------------------------
 
-FEFiberPowLinear::FEFiberPowLinear(FEModel* pfem) : FEElasticFiberMaterial(pfem)
+FEFiberPowLinear::FEFiberPowLinear(FEModel* pfem) : FEFiberMaterial(pfem)
 {
+    m_E = 0.0;
+    m_lam0 = 1.0;
+    m_beta = 2.0;
 	m_epsf = 0.0;
+	m_tension_only = true;
 }
 
 //-----------------------------------------------------------------------------
@@ -73,7 +77,7 @@ mat3ds FEFiberPowLinear::FiberStress(FEMaterialPoint& mp, const vec3d& n0)
     double In = n0*(C*n0);
     
     // only take fibers in tension into consideration
-    if (In - 1 >= eps)
+    if (!m_tension_only || (In - 1 >= eps))
     {
         // get the global spatial fiber direction in current configuration
         vec3d nt = F*n0/sqrt(In);
@@ -122,7 +126,7 @@ tens4ds FEFiberPowLinear::FiberTangent(FEMaterialPoint& mp, const vec3d& n0)
     
     // only take fibers in tension into consideration
 	const double eps = m_epsf * std::numeric_limits<double>::epsilon();
-    if (In >= 1 + eps)
+    if (!m_tension_only || (In >= 1 + eps))
     {
         // get the global spatial fiber direction in current configuration
         vec3d nt = F*n0/sqrt(In);
@@ -170,7 +174,7 @@ double FEFiberPowLinear::FiberStrainEnergyDensity(FEMaterialPoint& mp, const vec
     double In = n0*(C*n0);
     
     // only take fibers in tension into consideration
-    if (In - 1 >= eps)
+    if (!m_tension_only || (In - 1 >= eps))
     {
         // calculate strain energy density
         sed = (In < I0) ?
@@ -181,21 +185,29 @@ double FEFiberPowLinear::FiberStrainEnergyDensity(FEMaterialPoint& mp, const vec
     return sed;
 }
 
+// define the material parameters
+BEGIN_FECORE_CLASS(FEElasticFiberPowLinear, FEElasticFiberMaterial)
+    ADD_PARAMETER(m_fib.m_E    , FE_RANGE_GREATER(0.0), "E"    )->setUnits(UNIT_PRESSURE);
+    ADD_PARAMETER(m_fib.m_lam0 , FE_RANGE_GREATER(1.0), "lam0" );
+    ADD_PARAMETER(m_fib.m_beta , FE_RANGE_GREATER_OR_EQUAL(2.0), "beta" );
+	ADD_PARAMETER(m_fib.m_tension_only, "tension_only");
+END_FECORE_CLASS();
+
+
 //-----------------------------------------------------------------------------
 // FEFiberExpPowLinear
 //-----------------------------------------------------------------------------
 
 // define the material parameters
-BEGIN_FECORE_CLASS(FEFiberExpPowLinear, FEElasticFiberMaterial)
+BEGIN_FECORE_CLASS(FEFiberExpPowLinear, FEFiberMaterial)
 	ADD_PARAMETER(m_E   , FE_RANGE_GREATER_OR_EQUAL(0.0), "E");
     ADD_PARAMETER(m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha");
 	ADD_PARAMETER(m_beta, FE_RANGE_GREATER_OR_EQUAL(2.0), "beta");
 	ADD_PARAMETER(m_lam0, FE_RANGE_GREATER(1.0), "lam0");
-	ADD_PARAMETER(m_epsf, "epsilon_scale");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
-FEFiberExpPowLinear::FEFiberExpPowLinear(FEModel* pfem) : FEElasticFiberMaterial(pfem)
+FEFiberExpPowLinear::FEFiberExpPowLinear(FEModel* pfem) : FEFiberMaterial(pfem)
 {
 	m_E = 0;
 	m_lam0 = 1;
@@ -207,7 +219,7 @@ FEFiberExpPowLinear::FEFiberExpPowLinear(FEModel* pfem) : FEElasticFiberMaterial
 //-----------------------------------------------------------------------------
 bool FEFiberExpPowLinear::Validate()
 {
-	if (FEElasticFiberMaterial::Validate() == false) return false;
+	if (FEFiberMaterial::Validate() == false) return false;
 
 	return true;
 }
@@ -362,3 +374,11 @@ double FEFiberExpPowLinear::FiberStrainEnergyDensity(FEMaterialPoint& mp, const 
 
 	return sed;
 }
+
+// define the material parameters
+BEGIN_FECORE_CLASS(FEElasticFiberExpPowLinear, FEElasticFiberMaterial)
+	ADD_PARAMETER(m_fib.m_E   , FE_RANGE_GREATER_OR_EQUAL(0.0), "E");
+    ADD_PARAMETER(m_fib.m_alpha, FE_RANGE_GREATER_OR_EQUAL(0.0), "alpha");
+	ADD_PARAMETER(m_fib.m_beta, FE_RANGE_GREATER_OR_EQUAL(2.0), "beta");
+	ADD_PARAMETER(m_fib.m_lam0, FE_RANGE_GREATER(1.0), "lam0");
+END_FECORE_CLASS();

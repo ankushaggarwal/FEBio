@@ -32,7 +32,6 @@ SOFTWARE.*/
 #include <string>
 #include <FECore/FEElement.h>
 #include <FECore/FETransform.h>
-using namespace std;
 
 //-----------------------------------------------------------------------------
 class FEModel;
@@ -63,6 +62,13 @@ public:
 		int ntype;
 	};
 
+	struct EDGE
+	{
+		int id;
+		int node[FEElement::MAX_NODES];
+		int ntype;
+	};
+
 	class Domain
 	{
 	public:
@@ -70,14 +76,14 @@ public:
 		Domain(const Domain& dom);
 		Domain(const FE_Element_Spec& spec);
 
-		void SetName(const string& name);
-		const string& Name() const;
+		void SetName(const std::string& name);
+		const std::string& Name() const;
 
-		void SetMaterialName(const string& name);
-		const string& MaterialName() const;
+		void SetMaterialName(const std::string& name);
+		const std::string& MaterialName() const;
 
-		void SetElementList(const vector<ELEMENT>& el);
-		const vector<ELEMENT>& ElementList() const;
+		void SetElementList(const std::vector<ELEMENT>& el);
+		const std::vector<ELEMENT>& ElementList() const;
 
 		int Elements() const { return (int) m_Elem.size(); }
 
@@ -92,35 +98,44 @@ public:
 
 	private:
 		FE_Element_Spec		m_spec;
-		string				m_name;
-		string				m_matName;
-		vector<ELEMENT>		m_Elem;
+		std::string			m_name;
+		std::string			m_matName;
+		std::vector<ELEMENT>	m_Elem;
 
 	public:
 		double	m_defaultShellThickness;
 	};
 
+	class PartList;
+
+	// a surface can be defined explicitly (using a list of facets)
+	// or implicitly via a part list (in this case, the facet list will be empty 
+	// and the part list can be found via GetPartList()
 	class Surface
 	{
 	public:
 		Surface();
 		Surface(const Surface& surf);
-		Surface(const string& name);
+		Surface(const std::string& name);
+		Surface(const std::string& name, PartList* partList);
 
-		void SetName(const string& name);
-		const string& Name() const;
+		void SetName(const std::string& name);
+		const std::string& Name() const;
 
-		void SetFacetList(const vector<FACET>& el);
-		const vector<FACET>& FacetList() const;
+		void SetFacetList(const std::vector<FACET>& el);
+		const std::vector<FACET>& FacetList() const;
 
 		void Create(int n) { m_Face.resize(n); }
 
 		int Facets() const { return (int) m_Face.size(); }
 		FACET& GetFacet(int i) { return m_Face[i]; }
 
+		PartList* GetPartList() { return m_partList; }
+
 	private:
-		string	m_name;
-		vector<FACET>	m_Face;
+		std::string	m_name;
+		std::vector<FACET>	m_Face;
+		PartList* m_partList;
 	};
 
 	class NodeSet
@@ -128,17 +143,38 @@ public:
 	public:
 		NodeSet();
 		NodeSet(const NodeSet& set);
-		NodeSet(const string& name);
+		NodeSet(const std::string& name);
 
-		void SetName(const string& name);
-		const string& Name() const;
+		void SetName(const std::string& name);
+		const std::string& Name() const;
 
-		void SetNodeList(const vector<int>& node);
-		const vector<int>& NodeList() const;
+		void SetNodeList(const std::vector<int>& node);
+		const std::vector<int>& NodeList() const;
 
 	private:
-		string		m_name;
-		vector<int>	m_node;
+		std::string		m_name;
+		std::vector<int>	m_node;
+	};
+
+	class EdgeSet
+	{
+	public:
+		EdgeSet();
+		EdgeSet(const EdgeSet& set);
+		EdgeSet(const std::string& name);
+
+		void SetName(const std::string& name);
+		const std::string& Name() const;
+
+		void SetEdgeList(const std::vector<EDGE>& edge);
+		const std::vector<EDGE>& EdgeList() const;
+
+		int Edges() const { return (int)m_edge.size(); }
+		EDGE& Edge(int i) { return m_edge[i]; }
+
+	private:
+		std::string			m_name;
+		std::vector<EDGE>	m_edge;
 	};
 
 	class ElementSet
@@ -146,17 +182,37 @@ public:
 	public:
 		ElementSet();
 		ElementSet(const ElementSet& set);
-		ElementSet(const string& name);
+		ElementSet(const std::string& name);
 
-		void SetName(const string& name);
-		const string& Name() const;
+		void SetName(const std::string& name);
+		const std::string& Name() const;
 
-		void SetElementList(const vector<int>& elem);
-		const vector<int>& ElementList() const;
+		void SetElementList(const std::vector<int>& elem);
+		const std::vector<int>& ElementList() const;
 
 	private:
-		string		m_name;
-		vector<int>	m_elem;
+		std::string			m_name;
+		std::vector<int>	m_elem;
+	};
+
+	class PartList
+	{
+	public:
+		PartList();
+		PartList(const std::string& name);
+
+		void SetName(const std::string& name);
+		const std::string& Name() const;
+
+		void SetPartList(const std::vector<std::string>& parts);
+		const std::vector<std::string>& GetPartList() const;
+
+		size_t Parts() const { return m_parts.size(); }
+		const std::string& PartName(size_t n) const { return m_parts[n]; }
+
+	private:
+		std::string					m_name;
+		std::vector<std::string>	m_parts;
 	};
 
 	class SurfacePair
@@ -165,12 +221,12 @@ public:
 		SurfacePair();
 		SurfacePair(const SurfacePair& surfPair);
 
-		const string& Name() const;
+		const std::string& Name() const;
 
 	public:
-		string	m_name;
-		string	m_primary;
-		string	m_secondary;		
+		std::string	m_name;
+		std::string	m_primary;
+		std::string	m_secondary;		
 	};
 
 	class DiscreteSet
@@ -185,16 +241,17 @@ public:
 		DiscreteSet();
 		DiscreteSet(const DiscreteSet& set);
 
-		void SetName(const string& name);
-		const string& Name() const;
+		void SetName(const std::string& name);
+		const std::string& Name() const;
 
 		void AddElement(int n0, int n1);
-		const vector<ELEM>& ElementList() const;
+		const std::vector<ELEM>& ElementList() const;
 
 	private:
-		string			m_name;
-		vector<ELEM>	m_elem;
+		std::string			m_name;
+		std::vector<ELEM>	m_elem;
 	};
+
 	class Part
 	{
 	public:
@@ -204,27 +261,39 @@ public:
 		~Part();
 
 		void SetName(const std::string& name);
-		const string& Name() const;
+		const std::string& Name() const;
 
 		void AddNodes(const std::vector<NODE>& nodes);
 
 		int Domains() const { return (int)m_Dom.size(); }
 		void AddDomain(Domain* dom);
 		const Domain& GetDomain(int i) const { return *m_Dom[i]; }
-		Domain* FindDomain(const string& name);
+		Domain* FindDomain(const std::string& name);
 
 		int Surfaces() const { return (int) m_Surf.size(); }
 		void AddSurface(Surface* surf);
 		Surface* GetSurface(int i) { return m_Surf[i]; }
-		Surface* FindSurface(const string& name);
+		Surface* FindSurface(const std::string& name);
 
 		int NodeSets() const { return (int) m_NSet.size(); }
 		void AddNodeSet(NodeSet* nset) { m_NSet.push_back(nset); }
 		NodeSet* GetNodeSet(int i) { return m_NSet[i]; }
+		NodeSet* FindNodeSet(const std::string& name);
+
+		int EdgeSets() const { return (int)m_LSet.size(); }
+		void AddEdgeSet(EdgeSet* cset) { m_LSet.push_back(cset); }
+		EdgeSet* GetEdgeSet(int i) { return m_LSet[i]; }
+		EdgeSet* FindEdgeSet(const std::string& name);
 
 		int ElementSets() const { return (int) m_ESet.size(); }
 		void AddElementSet(ElementSet* eset) { m_ESet.push_back(eset); }
 		ElementSet* GetElementSet(int i) { return m_ESet[i]; }
+		ElementSet* FindElementSet(const std::string& name);
+
+		int PartLists() const { return (int)m_PList.size(); }
+		void AddPartList(PartList* plist) { m_PList.push_back(plist); }
+		PartList* GetPartList(int i) { return m_PList[i]; }
+		PartList* FindPartList(const std::string& name);
 
 		int SurfacePairs() const { return (int)m_SurfPair.size(); }
 		void AddSurfacePair(SurfacePair* sp) { m_SurfPair.push_back(sp); }
@@ -239,14 +308,16 @@ public:
 		NODE& GetNode(int i) { return m_Node[i]; }
 
 	private:
-		string				m_name;
-		vector<NODE>		m_Node;
-		vector<Domain*>		m_Dom;
-		vector<Surface*>	m_Surf;
-		vector<NodeSet*>	m_NSet;
-		vector<ElementSet*>	m_ESet;
-		vector<SurfacePair*>	m_SurfPair;
-		vector<DiscreteSet*>	m_DiscSet;
+		std::string					m_name;
+		std::vector<NODE>			m_Node;
+		std::vector<Domain*>		m_Dom;
+		std::vector<Surface*>		m_Surf;
+		std::vector<NodeSet*>		m_NSet;
+		std::vector<EdgeSet*>		m_LSet;
+		std::vector<ElementSet*>	m_ESet;
+		std::vector<PartList*>		m_PList;
+		std::vector<SurfacePair*>	m_SurfPair;
+		std::vector<DiscreteSet*>	m_DiscSet;
 	};
 
 public:
@@ -258,9 +329,9 @@ public:
 	Part* AddPart(const std::string& name);
 	void AddPart(Part* part);
 
-	Part* FindPart(const string& name);
+	Part* FindPart(const std::string& name);
 
-	bool BuildPart(FEModel& fem, Part& part, bool buildDomains = true, const FETransform& T = FETransform());
+	bool BuildPart(FEModel& fem, Part& part, bool buildDomains = true, const Transform& T = Transform());
 
 private:
 	std::vector<Part*>	m_Part;

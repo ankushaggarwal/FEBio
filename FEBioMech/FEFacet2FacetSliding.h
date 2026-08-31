@@ -42,7 +42,9 @@ public:
 	public:
 		Data();
 
-		void Serialize(DumpStream& ar);
+		void Serialize(DumpStream& ar) override;
+
+		void Init() override;
 
 	public:
 		double	m_Lm;	//!< Lagrange multipliers

@@ -31,15 +31,18 @@ SOFTWARE.*/
 //! Abstract base class for shell element domains
 class FECORE_API FEShellDomain : public FEDomain
 {
+	FECORE_SUPER_CLASS(FESHELLDOMAIN_ID)
+	FECORE_BASE_CLASS(FEShellDomain)
+
 public:
 	//! constructor
 	FEShellDomain(FEModel* fem);
 
 	//! Update element data prior to solving time step
-	void PreSolveUpdate(const FETimeInfo& timeInfo);
+	void PreSolveUpdate(const FETimeInfo& timeInfo) override;
 
 	//! Reset element data
-	void Reset();
+	void Reset() override;
 
 	// get a shell element
 	virtual FEShellElement& Element(int i) = 0;
@@ -55,7 +58,9 @@ public:
 	virtual double CurrentVolume(FEShellElement& el) { return 0.0; }
 
 	// Initialize shell data (Called from FEMesh::InitShells)
-	virtual void InitShells();
+	virtual bool InitShells();
+
+	virtual void AssignDefaultShellThickness() {}
 
 public:
     //! get the current nodal coordinates
@@ -70,6 +75,8 @@ public:
     
 public:
 	void ForEachShellElement(std::function<void(FEShellElement& el)> f);
+
+	DECLARE_FECORE_CLASS();
 };
 
 //-----------------------------------------------------------------------------
@@ -95,7 +102,7 @@ public:
 
 	double Volume(FEShellElement& el) override;
 
-	void InitShells() override;
+	bool InitShells() override;
 
 protected:
 	vector<FEShellElementOld>	m_Elem;	//!< array of elements
@@ -124,6 +131,15 @@ public:
 
 	double Volume(FEShellElement& el) override;
 
+	double DefaultShellThickness() const { return m_h0; }
+
+	void AssignDefaultShellThickness() override;
+
+protected:
+	double	m_h0;
+
 protected:
 	vector<FEShellElementNew>	m_Elem;	//!< array of elements
+
+	DECLARE_FECORE_CLASS();
 };

@@ -29,15 +29,15 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FESurfaceAttractionBodyForce.h"
 #include "FEElasticMaterial.h"
-#include <FECore/FEModel.h>
+#include <FECore/FEMesh.h>
 #include <FECore/FEClosestPointProjection.h>
 #include <FECore/log.h>
 
 BEGIN_FECORE_CLASS(FESurfaceAttractionBodyForce, FEBodyForce);
-    ADD_PARAMETER(m_blt     , "blt"          );
+    ADD_PARAMETER(m_blt     , "blt"          )->setUnits(UNIT_LENGTH);
     ADD_PARAMETER(m_bsf     , "bsf"          );
     ADD_PARAMETER(m_stol    , "search_tol"   );
-    ADD_PARAMETER(m_sradius , "search_radius");
+    ADD_PARAMETER(m_sradius , "search_radius")->setUnits(UNIT_LENGTH);
 
 	ADD_PROPERTY(m_s, "surface", FEProperty::Reference);
 END_FECORE_CLASS();
@@ -70,7 +70,7 @@ bool FESurfaceAttractionBodyForce::Init()
 	cpp.Init();
 
     // allocate projection point vector array
-    int nel = GetFEModel()->GetMesh().Elements();
+    int nel = GetMesh().Elements();
     m_q.resize(nel);
     
     const char s[] = "%%";
@@ -130,7 +130,22 @@ vec3d FESurfaceAttractionBodyForce::force(FEMaterialPoint& mp)
     return f;
 }
 
-mat3ds FESurfaceAttractionBodyForce::stiffness(FEMaterialPoint& mp)
+//-----------------------------------------------------------------------------
+double FESurfaceAttractionBodyForce::divforce(FEMaterialPoint& mp)
+{
+    // get element number for this material point
+    int eid = mp.m_elem->GetID() - 1;
+    
+    vec3d q = m_q[eid][mp.m_index];
+    
+    // calculate net force
+    vec3d g = mp.m_r0 - q;
+    double r = g.unit();
+    
+    return (3-r/m_blt)*(m_bsf*exp(-r/m_blt));
+}
+
+mat3d FESurfaceAttractionBodyForce::stiffness(FEMaterialPoint& mp)
 {
     return mat3ds(0,0,0,0,0,0);
 }

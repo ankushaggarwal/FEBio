@@ -28,15 +28,17 @@ SOFTWARE.*/
 
 #pragma once
 #include "FEElasticFiberMaterialUC.h"
+#include "FEFiberMaterial.h"
+#include <FECore/FEModelParam.h>
 
 //-----------------------------------------------------------------------------
 //! Uncoupled formulation of the fiber-exp-linear material for use with uncoupled
 //! solid mixtures.
-class FEUncoupledFiberExpLinear : public FEElasticFiberMaterialUC
+class FEFiberExpLinearUC : public FEFiberMaterialUncoupled
 {
 public:
 	//! Constructor
-	FEUncoupledFiberExpLinear(FEModel* pfem);
+	FEFiberExpLinearUC(FEModel* pfem);
 
 	//! calculate deviatoric stress at material point
 	mat3ds DevFiberStress(FEMaterialPoint& pt, const vec3d& n0) override;
@@ -48,10 +50,18 @@ public:
 	double DevFiberStrainEnergyDensity(FEMaterialPoint& pt, const vec3d& n0) override;
 
 public:
-	double	m_c3;		//!< Exponential stress coefficient
-	double	m_c4;		//!< Fiber uncrimping coefficient
-	double	m_c5;		//!< Modulus of straightened fibers
-	double	m_lam1;		//!< fiber stretch for straightened fibers
+    FEParamDouble   m_c3;        //!< Exponential stress coefficient
+    FEParamDouble   m_c4;       //!< fiber uncrimping coefficient
+    FEParamDouble   m_c5;       //!< modulus of straightened fibers
+    FEParamDouble   m_lam1;        //!< fiber stretch for straightened fibers
 
+
+	DECLARE_FECORE_CLASS();
+};
+
+class FEUncoupledFiberExpLinear : public FEElasticFiberMaterialUC_T<FEFiberExpLinearUC>
+{
+public: 
+	FEUncoupledFiberExpLinear(FEModel* fem) : FEElasticFiberMaterialUC_T<FEFiberExpLinearUC>(fem) {}
 	DECLARE_FECORE_CLASS();
 };

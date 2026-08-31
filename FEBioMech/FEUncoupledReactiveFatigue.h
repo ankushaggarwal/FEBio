@@ -57,10 +57,7 @@ public:
     bool Init() override;
     
     // returns a pointer to a new material point object
-    FEMaterialPoint* CreateMaterialPointData() override
-    {
-        return new FEReactiveFatigueMaterialPoint(m_pBase->CreateMaterialPointData());
-    }
+	FEMaterialPointData* CreateMaterialPointData() override;
     
     // get the elastic material
     FEElasticMaterial* GetElasticMaterial() override { return m_pBase; }
@@ -76,8 +73,8 @@ public:
     FEDamageCriterion*      m_pFcrt;    // fatigue criterion
     
 public:
-    double      m_k0;       // reaction rate for fatigue reaction
-    double      m_beta;     // power exponent for fatigue reaction
-    
+    FEParamDouble           m_k0;       // reaction rate for fatigue reaction
+    FEParamDouble           m_beta;     // power exponent for fatigue reaction
+
     DECLARE_FECORE_CLASS();
 };

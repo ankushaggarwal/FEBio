@@ -32,6 +32,7 @@ SOFTWARE.*/
 #include <limits>
 #include <assert.h>
 #include <float.h>
+#include "matrix.h"
 
 #ifndef SQR
 #define SQR(x) ((x)*(x))
@@ -506,7 +507,7 @@ void solve_3x3(double A[3][3], double b[3], double x[3])
 	x[2] = (Ai[2][0] * b[0] + Ai[2][1] * b[1] + Ai[2][2] * b[2]) / D;
 
 
-#ifdef _DEBUG
+#ifndef NDEBUG
 	double r[3];
 	r[0] = b[0] - (A[0][0] * x[0] + A[0][1] * x[1] + A[0][2] * x[2]);
 	r[1] = b[1] - (A[1][0] * x[0] + A[1][1] * x[1] + A[1][2] * x[2]);
@@ -514,4 +515,433 @@ void solve_3x3(double A[3][3], double b[3], double x[3])
 
 	double nr = sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
 #endif
+}
+
+//=============================================================================
+
+bool LinearRegression(const std::vector<std::pair<double, double> >& data, std::pair<double, double>& res)
+{
+	res.first = 0.0;
+	res.second = 0.0;
+
+	int n = (int)data.size();
+	if (n == 0) return false;
+
+	double mx = 0.0, my = 0.0;
+	double sxx = 0.0, sxy = 0.0;
+	for (int i = 0; i < n; ++i)
+	{
+		double xi = data[i].first;
+		double yi = data[i].second;
+		mx += xi;
+		my += yi;
+
+		sxx += xi * xi;
+		sxy += xi * yi;
+	}
+	mx /= (double)n;
+	my /= (double)n;
+	sxx /= (double)n;
+	sxy /= (double)n;
+
+	double D = sxx - mx * mx;
+	if (D == 0.0) return false;
+
+	double a = (sxy - mx * my) / D;
+	double b = my - a * mx;
+
+	res.first = a;
+	res.second = b;
+
+	return true;
+}
+
+class Func
+{
+public:
+	Func() {}
+	virtual ~Func() {}
+	virtual void setParams(const std::vector<double>& v) = 0;
+	virtual double value(double x) = 0;
+	virtual double derive1(double x, int n) = 0;
+	virtual double derive2(double x, int n1, int n2) = 0;
+};
+
+class Quadratic : public Func
+{
+public:
+	Quadratic() : m_a(0.0), m_b(0.0), m_c(0.0) {}
+	void setParams(const std::vector<double>& v) override { m_a = v[0]; m_b = v[1]; m_c = v[2]; }
+	double value(double x) override { return m_a * x * x + m_b * x + m_c; }
+	double derive1(double x, int n) override
+	{
+		switch (n)
+		{
+		case 0: return x * x; break;
+		case 1: return x; break;
+		case 2: return 1; break;
+		default:
+			assert(false);
+			return 0.0;
+		}
+	}
+
+	double derive2(double x, int n1, int n2) override
+	{
+		return 0.0;
+	}
+
+private:
+	double	m_a, m_b, m_c;
+};
+
+class Exponential : public Func
+{
+public:
+	Exponential() : m_a(0.0), m_b(0.0) {}
+	void setParams(const std::vector<double>& v) override { m_a = v[0]; m_b = v[1]; }
+	double value(double x) override { return m_a * exp(x * m_b); }
+	double derive1(double x, int n) override
+	{
+		switch (n)
+		{
+		case 0: return exp(x * m_b); break;
+		case 1: return m_a * x * exp(x * m_b); break;
+		default:
+			assert(false);
+			return 0.0;
+		}
+	}
+
+	double derive2(double x, int n1, int n2) override
+	{
+		if ((n1 == 0) && (n2 == 0)) return 0;
+		else if ((n1 == 0) && (n2 == 1)) return x * exp(x * m_b);
+		else if ((n1 == 1) && (n2 == 0)) return x * exp(x * m_b);
+		else if ((n1 == 1) && (n2 == 1)) return m_a * x * x * exp(x * m_b);
+		else return 0.0;
+	}
+
+private:
+	double	m_a, m_b;
+};
+
+bool NonlinearRegression(const std::vector<std::pair<double, double> >& data, std::vector<double>& res, int func)
+{
+	int MAX_ITER = 10;
+	int niter = 0;
+
+	int n = (int)data.size();
+	int m = (int)res.size();
+
+	Func* f = 0;
+	switch (func)
+	{
+	case 1: f = new Quadratic; break;
+	case 2: f = new Exponential; break;
+	}
+	if (f == 0) return false;
+
+	std::vector<double> R(m, 0.0), da(m, 0.0);
+	matrix K(m, m); K.zero();
+
+	const double absTol = 1e-15;
+	const double relTol = 1e-3;
+	double norm0 = 0.0;
+	do
+	{
+		f->setParams(res);
+
+		// evaluate residual (and norm)
+		double norm = 0.0;
+		for (int i = 0; i < m; ++i)
+		{
+			R[i] = 0.0;
+			for (int j = 0; j < n; ++j)
+			{
+				double xj = data[j].first;
+				double yj = data[j].second;
+				double fj = f->value(xj);
+				double Dfi = f->derive1(xj, i);
+				R[i] -= (fj - yj) * Dfi;
+			}
+
+			norm += R[i] * R[i];
+		}
+		norm = sqrt(norm / n);
+
+		if (norm < absTol) break;
+
+		if (niter == 0) norm0 = norm;
+		else
+		{
+			double rel = norm / norm0;
+			if (rel < relTol) break;
+		}
+
+		// evaluate Jacobian
+		for (int i = 0; i < m; ++i)
+		{
+			for (int j = 0; j < m; ++j)
+			{
+				double Kij = 0.0;
+				for (int k = 0; k < n; ++k)
+				{
+					double xk = data[k].first;
+					double yk = data[k].second;
+					double fk = f->value(xk);
+
+					double Dfi = f->derive1(xk, i);
+					double Dfj = f->derive1(xk, j);
+
+					double Dfij = f->derive2(xk, i, j);
+
+					Kij += Dfi * Dfj + (fk - yk) * Dfij;
+				}
+
+				K[i][j] = Kij;
+			}
+		}
+
+		// solve linear system
+		K.solve(da, R);
+
+		for (int i = 0; i < m; ++i) res[i] += da[i];
+
+		niter++;
+	} while (niter < MAX_ITER);
+
+	delete f;
+
+	return (niter < MAX_ITER);
+}
+
+//=============================================================================
+//! Polynomial root solver
+// function whose roots needs to be evaluated
+void fn(std::complex<double>& z, std::complex<double>& fz, std::vector<double> a)
+{
+	int n = (int)a.size() - 1;
+	fz = a[0];
+	std::complex<double> x(1, 0);
+
+	for (int i = 1; i <= n; ++i) {
+		x *= z;
+		fz += a[i] * x;
+	}
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// deflation
+bool dflate(std::complex<double> zero, const int i, int& kount,
+	std::complex<double>& fzero, std::complex<double>& fzrdfl,
+	std::complex<double>* zeros, std::vector<double> a)
+{
+	std::complex<double> den;
+	++kount;
+	fn(zero, fzero, a);
+	fzrdfl = fzero;
+	if (i < 1) return false;
+	for (int j = 0; j < i; ++j) {
+		den = zero - zeros[j];
+		if (abs(den) == 0) {
+			zeros[i] = zero * 1.001;
+			return true;
+		}
+		else {
+			fzrdfl = fzrdfl / den;
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Muller's method for solving roots of a function
+bool muller(bool fnreal, std::complex<double>* zeros, const int n, const int nprev,
+	const int maxit, const double ep1, const double ep2, std::vector<double> a)
+{
+	int kount;
+	std::complex<double> dvdf1p, fzrprv, fzrdfl, divdf1, divdf2;
+	std::complex<double> fzr, zero, c, den, sqr, z;
+
+	// initialization
+	double eps1 = (ep1 > 1e-12) ? ep1 : 1e-12;
+	double eps2 = (ep2 > 1e-20) ? ep2 : 1e-20;
+
+	for (int i = nprev; i < n; ++i) {
+		kount = 0;
+	eloop:
+		zero = zeros[i];
+		std::complex<double> h = 0.5;
+		std::complex<double> hprev = -1.0;
+
+		// compute first three estimates for zero as
+		// zero+0.5, zero-0.5, zero
+		z = zero + 0.5;
+		if (dflate(z, i, kount, fzr, dvdf1p, zeros, a)) goto eloop;
+		z = zero - 0.5;
+		if (dflate(z, i, kount, fzr, fzrprv, zeros, a)) goto eloop;
+		dvdf1p = (fzrprv - dvdf1p) / hprev;
+		if (dflate(zero, i, kount, fzr, fzrdfl, zeros, a)) goto eloop;
+		do {
+			divdf1 = (fzrdfl - fzrprv) / h;
+			divdf2 = (divdf1 - dvdf1p) / (h + hprev);
+			hprev = h;
+			dvdf1p = divdf1;
+			c = divdf1 + h * divdf2;
+			sqr = c * c - 4. * fzrdfl * divdf2;
+			if (fnreal && (sqr.real() < 0)) sqr = 0;
+			sqr = sqrt(sqr);
+			if (c.real() * sqr.real() + c.imag() * sqr.imag() < 0) {
+				den = c - sqr;
+			}
+			else {
+				den = c + sqr;
+			}
+			if (abs(den) <= 0.) den = 1.;
+			h = -2. * fzrdfl / den;
+			fzrprv = fzrdfl;
+			zero = zero + h;
+		dloop:
+			fn(zero, fzrdfl, a);
+			// check for convergence
+			if (abs(h) < eps1 * abs(zero)) break;
+			if (abs(fzrdfl) < eps2) break;
+			// check for divergence
+			if (abs(fzrdfl) >= 10. * abs(fzrprv)) {
+				h /= 2.;
+				zero -= h;
+				goto dloop;
+			}
+		} while (kount < maxit);
+		zeros[i] = zero;
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Newton's method for finding nearest root of a polynomial
+bool newton(double& zero, const int n, const int maxit,
+	const double ep1, const double ep2, std::vector<double> a)
+{
+	bool done = false;
+	bool conv = false;
+	int it = 0;
+	double f, df, x, dx, xi;
+	x = zero;
+
+	while (!done) {
+		// Evaluate function and its derivative
+		xi = x;
+		f = a[0] + a[1] * xi;
+		df = a[1];
+		for (int i = 2; i <= n; ++i) {
+			df += i * a[i] * xi;
+			xi *= x;
+			f += a[i] * xi;
+		}
+		if (df == 0) break;
+		// check absolute convergence and don't update x if met
+		if (abs(f) < ep2) {
+			done = true;
+			conv = true;
+			zero = x;
+			break;
+		}
+		// evaluate increment in x
+		dx = -f / df;
+		x += dx;
+		++it;
+		// check relative convergence
+		if (abs(dx) < ep1 * abs(x)) {
+			done = true;
+			conv = true;
+			zero = x;
+		}
+		// check iteration count
+		else if (it > maxit) {
+			done = true;
+			zero = x;
+		}
+	}
+	return conv;
+}
+
+//-----------------------------------------------------------------------------
+// linear
+bool poly1(std::vector<double> a, double& x)
+{
+	if (a[1]) {
+		x = -a[0] / a[1];
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// quadratic
+bool poly2(std::vector<double> a, double& x)
+{
+	if (a[2]) {
+		x = (-a[1] + sqrt(SQR(a[1]) - 4 * a[0] * a[2])) / (2 * a[2]);
+		return true;
+	}
+	else {
+		return poly1(a, x);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// higher order
+bool polyn(int n, std::vector<double> a, double& x)
+{
+	//    bool fnreal = true;
+	//    vector< complex<double> > zeros(n,complex<double>(1,0));
+	int maxit = 100;
+	double ep1 = 1e-6;
+	double ep2 = 1e-12;
+	return newton(x, n, maxit, ep1, ep2, a);
+}
+
+//-----------------------------------------------------------------------------
+// higher order
+bool polym(int n, std::vector<double> a, double& x)
+{
+	bool fnreal = true;
+	std::vector< std::complex<double> > zeros(n, std::complex<double>(1, 0));
+	int maxit = 100;
+	double ep1 = 1e-6;
+	double ep2 = 1e-12;
+
+	muller(fnreal, &zeros[0], n, 0, maxit, ep1, ep2, a);
+	for (int i = 0; i < n; ++i) {
+		if (fabs(zeros[i].imag()) < ep2) {
+			x = zeros[i].real();
+			return true;
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+bool solvepoly(int n, std::vector<double> a, double& x, bool nwt)
+{
+	switch (n) {
+	case 1:
+		return poly1(a, x);
+		break;
+	case 2:
+		return poly2(a, x);
+	default:
+		if (a[n]) {
+			return nwt ? polyn(n, a, x) : polym(n, a, x);
+		}
+		else {
+			return solvepoly(n - 1, a, x);
+		}
+		break;
+	}
 }

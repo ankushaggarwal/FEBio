@@ -23,17 +23,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
-
-
-
 #include "stdafx.h"
 #include "FERestartDiagnostics.h"
-#include <FEBioLib/FEBioModel.h>
+#include <FECore/FEModel.h>
 #include <FECore/FEAnalysis.h>
 #include <FECore/DumpFile.h>
 #include <FECore/log.h>
 
-//-----------------------------------------------------------------------------
 FERestartDiagnostic::FERestartDiagnostic(FEModel*pfem) : FECoreTask(pfem), m_dmp(*pfem)
 {
 	m_bok = false;
@@ -82,7 +78,7 @@ bool restart_test_cb(FEModel* pfem, unsigned int nwen, void* pd)
 // initialize the diagnostic
 bool FERestartDiagnostic::Init(const char* sz)
 {
-	FEBioModel& fem = dynamic_cast<FEBioModel&>(*GetFEModel());
+	FEModel& fem = *GetFEModel();
 
 	// copy the file name (if any)
 	if (sz && (sz[0] != 0)) strcpy(m_szdmp, sz);
@@ -90,7 +86,8 @@ bool FERestartDiagnostic::Init(const char* sz)
 	// Make sure that restart flag is off.
 	// This is because we are hijacking restart and we don't
 	// want regular restart to interfere.
-	fem.SetDumpLevel(FE_DUMP_NEVER);
+	// TODO: is this really necessary? This creates a circular link between FEBioTest and FEBioLib
+//	fem.SetDumpLevel(FE_DUMP_NEVER);
 
 	// Add the restart callback
 	fem.AddCallback(restart_test_cb, CB_MAJOR_ITERS, this);
@@ -103,7 +100,7 @@ bool FERestartDiagnostic::Init(const char* sz)
 // run the diagnostic
 bool FERestartDiagnostic::Run()
 {
-	FEBioModel* fem = dynamic_cast<FEBioModel*>(GetFEModel());
+	FEModel* fem = GetFEModel();
 
 	while (fem->Solve() == false)
 	{
@@ -144,6 +141,60 @@ bool FERestartDiagnostic::Run()
 		}
 		else return false;
 	}
+
+	return true;
+}
+
+FEQuickRestartDiagnostic::FEQuickRestartDiagnostic(FEModel* pfem) : FECoreTask(pfem)
+{
+	strcpy(m_szdmp, "out.dmp");
+}
+
+// initialize the diagnostic
+bool FEQuickRestartDiagnostic::Init(const char* sz)
+{
+	FEModel& fem = *GetFEModel();
+
+	// copy the file name (if any)
+	if (sz && (sz[0] != 0)) strcpy(m_szdmp, sz);
+
+	// do the FE initialization
+	return fem.Init();
+}
+
+// run the diagnostic
+bool FEQuickRestartDiagnostic::Run()
+{
+	FEModel* fem = GetFEModel();
+
+	// write the restart file
+	DumpFile out(*fem);
+	if (out.Create(m_szdmp) == false)
+	{
+		feLogErrorEx(fem, "Failed creating dump file!");
+		return false;
+	}
+	feLogEx(fem, "Writing dump file...");
+	fem->Serialize(out);
+	out.Close();
+	feLogEx(fem, "done!\n");
+
+	// clear the model
+	fem->Clear();
+
+	// reopen the dump file for reading
+	DumpFile in(*fem);
+	if (in.Open(m_szdmp) == false)
+	{
+		feLogErrorEx(fem, "failed opening restart dump file.\n");
+		return false;
+	}
+	feLogEx(fem, "Reading dump file...");
+	fem->Serialize(in);
+	in.Close();
+	feLogEx(fem, "done!\n");
+
+	feLogEx(fem, "All is well!\n\n");
 
 	return true;
 }

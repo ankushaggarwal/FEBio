@@ -28,7 +28,6 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FEMortarSlidingContact.h"
-#include "FECore/FEModel.h"
 #include "FECore/mortar.h"
 #include "FECore/FEGlobalMatrix.h"
 #include "FECore/log.h"
@@ -121,9 +120,9 @@ END_FECORE_CLASS();
 //-----------------------------------------------------------------------------
 FEMortarSlidingContact::FEMortarSlidingContact(FEModel* pfem) : FEMortarInterface(pfem), m_ss(pfem), m_ms(pfem)
 {
-	m_dofX = pfem->GetDOFIndex("x");
-	m_dofY = pfem->GetDOFIndex("y");
-	m_dofZ = pfem->GetDOFIndex("z");
+	m_dofX = (pfem ? GetDOFIndex("x") : -1);
+	m_dofY = (pfem ? GetDOFIndex("y") : -1);
+	m_dofZ = (pfem ? GetDOFIndex("z") : -1);
 }
 
 //-----------------------------------------------------------------------------
@@ -513,7 +512,7 @@ void FEMortarSlidingContact::ContactNormalStiffness(FELinearSystem& LS)
 //! calculate Lagrangian augmentations
 bool FEMortarSlidingContact::Augment(int naug, const FETimeInfo& tp)
 {
-	if (m_laugon != 1) return true;
+	if (m_laugon != FECore::AUGLAG_METHOD) return true;
 
 	double max_err = 0.0;
 	int NS = m_ss.Nodes();

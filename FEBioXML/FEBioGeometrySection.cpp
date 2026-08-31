@@ -29,11 +29,8 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEBioGeometrySection.h"
 #include "FECore/FESolidDomain.h"
-#include "FECore/FEShellDomain.h"
-#include "FECore/FETrussDomain.h"
-#include "FECore/FEDomain2D.h"
 #include "FECore/FEModel.h"
-#include "FEBioMech/FEElasticMaterial.h"
+#include "FECore/FEMaterial.h"
 #include "FECore/FECoreKernel.h"
 #include <FECore/FENodeNodeList.h>
 
@@ -101,7 +98,7 @@ void FEBioGeometrySection1x::ParseNodeSection(XMLTag& tag)
 	FENodeSet* ps = 0;
 	if (szl)
 	{
-		ps = fecore_alloc(FENodeSet, &fem);
+		ps = new FENodeSet(&fem);
 
 		ps->SetName(szl);
 		mesh.AddNodeSet(ps);
@@ -287,9 +284,9 @@ void set_element_fiber(FEElement& el, const vec3d& v, int ncomp)
 	for (int i = 0; i<el.GaussPoints(); ++i)
 	{
 		FEMaterialPoint* mp = (ncomp == -1) ? el.GetMaterialPoint(i) : el.GetMaterialPoint(i)->GetPointData(ncomp);
-
+/*
 		FEElasticMaterialPoint& pt = *mp->ExtractData<FEElasticMaterialPoint>();
-/*		mat3d& m = pt.m_Q;
+		mat3d& m = pt.m_Q;
 		m.zero();
 		m[0][0] = a.x; m[0][1] = b.x; m[0][2] = c.x;
 		m[1][0] = a.y; m[1][1] = b.y; m[1][2] = c.y;
@@ -317,7 +314,7 @@ void set_element_mat_axis(FEElement& el, const vec3d& v1, const vec3d& v2, int n
 	{
         FEMaterialPoint* mp = (ncomp == -1) ? el.GetMaterialPoint(i) : el.GetMaterialPoint(i)->GetPointData(ncomp);
 
-		FEElasticMaterialPoint& pt = *mp->ExtractData<FEElasticMaterialPoint>();
+//		FEElasticMaterialPoint& pt = *mp->ExtractData<FEElasticMaterialPoint>();
 //		pt.m_Q = mat3d(a, b, c);
 	}
 }
@@ -537,7 +534,7 @@ void FEBioGeometrySection2::ParseNodeSection(XMLTag& tag)
 	FENodeSet* ps = 0;
 	if (szl)
 	{
-		ps = fecore_alloc(FENodeSet, &fem);
+		ps = new FENodeSet(&fem);
 
 		ps->SetName(szl);
 		mesh.AddNodeSet(ps);
@@ -633,7 +630,7 @@ void FEBioGeometrySection2::ParseElementSection(XMLTag& tag)
 	FEElementSet* pg = 0;
 	if (szname)
 	{
-		pg = fecore_alloc(FEElementSet, &fem);
+		pg = new FEElementSet(&fem);
 		pg->SetName(szname);
 		mesh.AddElementSet(pg);
 	}
@@ -900,7 +897,7 @@ void FEBioGeometrySection2::ParseSurfaceSection(XMLTag& tag)
 	int faces = tag.children();
 
 	// allocate storage for faces
-	FEFacetSet* ps = fecore_alloc(FEFacetSet, &fem);
+	FEFacetSet* ps = new FEFacetSet(&fem);
 	ps->Create(faces);
 	ps->SetName(szname);
 
@@ -948,7 +945,7 @@ void FEBioGeometrySection2::ParseElementSetSection(XMLTag& tag)
 	const char* szname = tag.AttributeValue("name");
 
 	// create a new element set
-	FEElementSet* pg = fecore_alloc(FEElementSet, &fem);
+	FEElementSet* pg = new FEElementSet(&fem);
 	pg->SetName(szname);
 
 	vector<int> l;
@@ -1046,7 +1043,7 @@ void FEBioGeometrySection25::ParsePartSection(XMLTag& tag)
 
 		// redirect input to another file
 		char xpath[256] = {0};
-		sprintf(xpath, "febio_spec/Geometry/Part[@name=%s]", szname);
+		snprintf(xpath, sizeof(xpath), "febio_spec/Geometry/Part[@name=%s]", szname);
 		XMLReader xml;
 		if (xml.Open(szfrom) == false) throw XMLReader::InvalidAttributeValue(tag, "from", szfrom);
 		XMLTag tag2;
@@ -1101,7 +1098,7 @@ void FEBioGeometrySection25::ParseInstanceSection(XMLTag& tag)
 	newPart->SetName(szname);
 
 	// parse any child tags
-	FETransform transform;
+	Transform transform;
 	if (tag.isleaf() == false)
 	{
 		++tag;
@@ -1111,7 +1108,7 @@ void FEBioGeometrySection25::ParseInstanceSection(XMLTag& tag)
 			{
 				double r[3];
 				tag.value(r, 3);
-				transform.SetTranslation(vec3d(r[0], r[1], r[2]));
+				transform.SetPosition(vec3d(r[0], r[1], r[2]));
 			}
 			else if (tag == "rotate")
 			{
@@ -1192,7 +1189,7 @@ void FEBioGeometrySection25::ParseNodeSection(XMLTag& tag)
 	FENodeSet* ps = 0;
 	if (szl)
 	{
-		ps = fecore_alloc(FENodeSet, &fem);
+		ps = new FENodeSet(&fem);
 
 		ps->SetName(szl);
 		mesh.AddNodeSet(ps);
@@ -1312,8 +1309,9 @@ void FEBioGeometrySection25::ParseElementSection(XMLTag& tag)
 	}
 
 	// get the name
+	string name;
 	const char* szname = tag.AttributeValue("name", true);
-	if (szname == 0) szname = "_unnamed";
+	if (szname) name = szname;
 
 	// get the element type
 	const char* sztype = tag.AttributeValue("type");
@@ -1324,7 +1322,7 @@ void FEBioGeometrySection25::ParseElementSection(XMLTag& tag)
 	FEDomain* pdom = GetBuilder()->CreateDomain(espec, pmat);
 	if (pdom == 0) throw FEBioImport::FailedCreatingDomain();
 	FEDomain& dom = *pdom;
-	dom.SetName(szname);
+	dom.SetName(name);
 
 	// active flag
 	const char* szactive = tag.AttributeValue("active", true);
@@ -1358,15 +1356,6 @@ void FEBioGeometrySection25::ParseElementSection(XMLTag& tag)
 	pdom->SetMatID(pmat->GetID() - 1);
 	mesh.AddDomain(pdom);
 
-	// for named domains, we'll also create an element set
-	FEElementSet* pg = 0;
-	if (szname)
-	{
-		pg = fecore_alloc(FEElementSet, &fem);
-		pg->SetName(szname);
-		mesh.AddElementSet(pg);
-	}
-
 	// read element data
 	for (int i = 0; i<elems; ++i)
 	{
@@ -1389,8 +1378,14 @@ void FEBioGeometrySection25::ParseElementSection(XMLTag& tag)
 		GetBuilder()->GlobalToLocalID(elem.node, el.Nodes(), el.m_node);
 	}
 
-	// create the element set
-	if (pg) pg->Create(pdom);
+	// for named domains, we'll also create an element set
+	if (!name.empty())
+	{
+		FEElementSet* pg = new FEElementSet(&fem);
+		pg->SetName(name);
+		mesh.AddElementSet(pg);
+		pg->Create(pdom);
+	}
 
 	// assign material point data
 	dom.CreateMaterialPointData();
@@ -1731,7 +1726,7 @@ void FEBioGeometrySection25::ParseSurfaceSection(XMLTag& tag)
 	// if parts are defined we use the new format
 	if (m_feb.Parts() > 0)
 	{
-		FEFacetSet* ps = fecore_alloc(FEFacetSet, &fem);
+		FEFacetSet* ps = new FEFacetSet(&fem);
 		ps->SetName(szname);
 
 		// add it to the mesh
@@ -1760,7 +1755,7 @@ void FEBioGeometrySection25::ParseSurfaceSection(XMLTag& tag)
 		int faces = tag.children();
 
 		// allocate storage for faces
-		FEFacetSet* ps = fecore_alloc(FEFacetSet, &fem);
+		FEFacetSet* ps = new FEFacetSet(&fem);
 		ps->Create(faces);
 		ps->SetName(szname);
 
@@ -1855,7 +1850,7 @@ void FEBioGeometrySection25::ParseElementSetSection(XMLTag& tag)
 	const char* szname = tag.AttributeValue("name");
 
 	// create a new element set
-	FEElementSet* pg = fecore_alloc(FEElementSet, &fem);
+	FEElementSet* pg = new FEElementSet(&fem);
 	pg->SetName(szname);
 
 	vector<int> l;

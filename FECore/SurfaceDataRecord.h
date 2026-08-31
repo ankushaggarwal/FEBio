@@ -31,12 +31,13 @@ class FESurface;
 
 //-----------------------------------------------------------------------------
 //! Base class for surface log data
-class FECORE_API FELogSurfaceData : public FECoreBase
+class FECORE_API FELogSurfaceData : public FELogData
 {
-    FECORE_SUPER_CLASS
+    FECORE_SUPER_CLASS(FELOGSURFACEDATA_ID)
+    FECORE_BASE_CLASS(FELogSurfaceData);
 
 public:
-    FELogSurfaceData(FEModel* fem) : FECoreBase(fem) {}
+    FELogSurfaceData(FEModel* fem) : FELogData(fem) {}
     virtual ~FELogSurfaceData() {}
     virtual double value(FESurface& surface) = 0;
 };
@@ -45,12 +46,12 @@ public:
 class FECORE_API FESurfaceDataRecord : public DataRecord
 {
 public:
-    FESurfaceDataRecord(FEModel* pfem, const char* szfile);
-    double Evaluate(int item, int ndata);
-    void SetData(const char* sz);
+    FESurfaceDataRecord(FEModel* pfem);
+    double Evaluate(int item, int ndata) override;
+    void SetData(const char* sz) override;
     void SetSurface(int surfIndex);
-    void SelectAllItems();
-    int Size() const;
+    void SelectAllItems() override;
+    int Size() const override;
 
 private:
     vector<FELogSurfaceData*>	m_Data;

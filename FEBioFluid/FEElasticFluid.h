@@ -35,29 +35,29 @@ SOFTWARE.*/
 //! Base class for the viscous part of the fluid response.
 //! These materials provide the viscous stress and its tangents.
 //!
-class FEBIOFLUID_API FEElasticFluid : public FEMaterial
+class FEBIOFLUID_API FEElasticFluid : public FEMaterialProperty
 {
 public:
-    FEElasticFluid(FEModel* pfem) : FEMaterial(pfem) {}
+    FEElasticFluid(FEModel* pfem) : FEMaterialProperty(pfem) {}
     virtual ~FEElasticFluid() {}
     
-    //! gage pressure
+    //! gauge pressure
     virtual double Pressure(FEMaterialPoint& pt) = 0;
     
     //! tangent of pressure with respect to strain J
-    virtual double Tangent_Strain(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_Strain(FEMaterialPoint& mp);
     
     //! 2nd tangent of pressure with respect to strain J
-    virtual double Tangent_Strain_Strain(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_Strain_Strain(FEMaterialPoint& mp);
     
     //! tangent of pressure with respect to temperature T
-    virtual double Tangent_Temperature(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_Temperature(FEMaterialPoint& mp);
     
     //! 2nd tangent of pressure with respect to temperature T
-    virtual double Tangent_Temperature_Temperature(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_Temperature_Temperature(FEMaterialPoint& mp);
     
     //! tangent of pressure with respect to strain J and temperature T
-    virtual double Tangent_Strain_Temperature(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_Strain_Temperature(FEMaterialPoint& mp);
     
     //! specific free energy
     virtual double SpecificFreeEnergy(FEMaterialPoint& mp) = 0;
@@ -72,16 +72,16 @@ public:
     virtual double IsochoricSpecificHeatCapacity(FEMaterialPoint& mp) = 0;
             
     //! tangent of isochoric specific heat capacity with respect to strain J
-    virtual double Tangent_cv_Strain(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_cv_Strain(FEMaterialPoint& mp);
             
     //! tangent of isochoric specific heat capacity with respect to temperature T
-    virtual double Tangent_cv_Temperature(FEMaterialPoint& mp) = 0;
+    virtual double Tangent_cv_Temperature(FEMaterialPoint& mp);
 
     //! isobaric specific heat capacity
     virtual double IsobaricSpecificHeatCapacity(FEMaterialPoint& mp) = 0;
             
-    //! calculate dilatation for given pressure and temperature
-    virtual bool Dilatation(const double T, const double p, const double c, double& e) = 0;
+    //! calculate dilatation for given (effective) pressure and temperature
+    virtual bool Dilatation(const double T, const double p, double& e) = 0;
     
     //! calculate fluid pressure and its derivatives from state variables
     double Pressure(const double ef, const double T);
@@ -95,10 +95,11 @@ public:
     //! specific internal energy
     double SpecificInternalEnergy(FEMaterialPoint& mp);
     
-    //! specific gage enthalpy
-    double SpecificGageEnthalpy(FEMaterialPoint& mp);
+    //! specific gauge enthalpy
+    double SpecificGaugeEnthalpy(FEMaterialPoint& mp);
     
     //! specific free enthalpy
     double SpecificFreeEnthalpy(FEMaterialPoint& mp);
-    
+
+    FECORE_BASE_CLASS(FEElasticFluid)
 };

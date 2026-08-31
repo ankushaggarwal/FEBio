@@ -41,7 +41,9 @@ public:
 	public:
 		Data();
 
-		void Serialize(DumpStream& ar);
+		void Init() override;
+
+		void Serialize(DumpStream& ar) override;
 
 	public:
 		vec3d	m_vgap;		//!< gap function

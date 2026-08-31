@@ -37,9 +37,10 @@ SOFTWARE.*/
 //=============================================================================
 
 //-----------------------------------------------------------------------------
-FEModelParameter::FEModelParameter(FEModel* fem) : FEInputParameter(fem)
+FEModelParameter::FEModelParameter(FEModel* fem) : FEInputParameter()
 {
-	m_pd = 0;
+	m_fem = fem;
+	m_pd = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -57,43 +58,25 @@ bool FEModelParameter::Init()
 		return false;
 	}
 
-    switch (val.type()) {
-        case FE_PARAM_DOUBLE:
-        {
-            // make sure we have a valid data pointer
-            double* pd = (double*) val.data_ptr();
-            if (pd == 0)
-            {
-                feLogError("Invalid data pointer for parameter %s", name.c_str());
-                return false;
-            }
-            
-            // store the pointer to the parameter
-            m_pd = pd;
-        }
-            break;
-            
-        case FE_PARAM_VEC2D:
-        {
-            // make sure we have a valid data pointer
-            vec2d* vd = (vec2d*) val.data_ptr();
-            if (vd == 0)
-            {
-                feLogError("Invalid data pointer for parameter %s", name.c_str());
-                return false;
-            }
-            // store the pointer to the parameter
-            m_pd = &vd->y();
-        }
-            break;
-            
-       default:
-        {
-            feLogError("Invalid parameter type for parameter %s", name.c_str());
-            return false;
-        }
-            break;
-    }
+	// Make sure it's a double
+	if (val.type() == FE_PARAM_DOUBLE)
+	{
+		// make sure we have a valid data pointer
+		double* pd = (double*)val.data_ptr();
+		if (pd == 0)
+		{
+			feLogError("Invalid data pointer for parameter %s", name.c_str());
+			return false;
+		}
+
+		// store the pointer to the parameter
+		m_pd = pd;
+	}
+	else
+	{
+		feLogError("Invalid parameter type for parameter %s", name.c_str());
+		return false;
+	}
 
 	return true;
 }
@@ -134,7 +117,7 @@ FEOptimizeData::~FEOptimizeData(void)
 bool FEOptimizeData::Init()
 {
 	// allocate default optimization solver if none specified in input file
-	if (m_pSolver == 0) m_pSolver = new FELMOptimizeMethod;
+	if (m_pSolver == 0) m_pSolver = new FELMOptimizeMethod(GetFEModel());
 
 	// allocate default solver if none specified in input file
 	if (m_pTask == 0) m_pTask = fecore_new<FECoreTask>("solve", m_fem);
@@ -175,24 +158,27 @@ bool FEOptimizeData::Solve()
 
 	// go for it!
 	int NVAR = (int) m_Var.size();
-	vector<double> amin(NVAR, 0.0);
-	vector<double> ymin;
-	double minObj = 0.0;
+	amin.resize(NVAR, 0.0);
 	bool bret = m_pSolver->Solve(this, amin, ymin, &minObj);
 	if (bret)
 	{
 		feLog("\nP A R A M E T E R   O P T I M I Z A T I O N   R E S U L T S\n\n");
 
-		feLog("\tFunction values:\n\n");
+		vector<double> xmin(ymin.size(), 0);
+		for (int i = 0; i < (int)ymin.size(); ++i) xmin[i] = i + 1;
+		m_obj->GetXValues(xmin);
+
+		feLog("\tFunction values:\n");
+		feLog("              X            F(X)\n");
 		for (int i=0; i<(int) ymin.size(); ++i)
-			feLog("\t\t%15lg\n", ymin[i]);
+			feLog("%15lg %15lg\n", xmin[i], ymin[i]);
 
 		// evaluate final regression coefficient
 		vector<double> y0;
 		m_obj->GetMeasurements(y0);
-		double minR2 = m_obj->RegressionCoefficient(y0, ymin);
+		minR2 = m_obj->RegressionCoefficient(y0, ymin);
 
-		feLog("\tTotal iterations ........ : %15d\n\n", m_niter);
+		feLog("\n\tTotal iterations ........ : %15d\n\n", m_niter);
 		feLog("\tFinal objective value ... : %15lg\n\n", minObj);
         feLog("\tFinal regression coef ... : %15lg\n\n", minR2);
 		feLog("\tOptimal parameters:\n\n");
@@ -213,6 +199,7 @@ bool FEOptimizeData::Solve()
 //!
 bool FEOptimizeData::Input(const char *szfile)
 {
+	m_filename = szfile;
 	FEOptimizeInput in;
 	if (in.Input(szfile, this) == false) return false;
 	return true;

@@ -28,14 +28,15 @@ SOFTWARE.*/
 
 #pragma once
 
-#include "FECore/FEMaterial.h"
+#include "FEElasticMaterial.h"
+#include "febiomech_api.h"
 
 //-----------------------------------------------------------------------------
 // Material point class for truss materials
-class FETrussMaterialPoint : public FEMaterialPoint
+class FETrussMaterialPoint : public FEElasticMaterialPoint
 {
 public:
-	FEMaterialPoint* Copy()
+	FEMaterialPointData* Copy()
 	{
 		FETrussMaterialPoint* pt = new FETrussMaterialPoint(*this);
 		if (m_pNext) pt->m_pNext = m_pNext->Copy();
@@ -44,43 +45,74 @@ public:
 
 	void Serialize(DumpStream& ar)
 	{
-		FEMaterialPoint::Serialize(ar);
-		ar & m_l & m_tau;
+		FEElasticMaterialPoint::Serialize(ar);
+		ar & m_lam & m_tau;
 	}
 
 	void Init()
 	{
-		FEMaterialPoint::Init();
-		m_l = 1;
+		FEElasticMaterialPoint::Init();
+		m_lam = 1;
 		m_tau = 0;
 	}
 
 public:
-	double	m_l;	// strech
+	double	m_lam;	// stretch
 	double	m_tau;	// Kirchoff stress
 };
 
 //-----------------------------------------------------------------------------
 // Base class for truss element materials
-class FETrussMaterial : public FEMaterial
+class FEBIOMECH_API FETrussMaterial : public FEMaterial
 {
 public:
-	FETrussMaterial(FEModel* pfem) : FEMaterial(pfem) {}
-	~FETrussMaterial(){}
+	FETrussMaterial(FEModel* pfem);
+	~FETrussMaterial();
 
 public:
-	double	m_E;	// Elastic modulus
+	FEParamDouble m_rho;	// density
 
 public:
 	//! calculate Kirchhoff stress of truss
-	virtual double Stress(FEMaterialPoint& pt);
+	virtual double Stress(FEMaterialPoint& pt) = 0;
 
 	//! calculate elastic tangent
-	virtual double Tangent(FEMaterialPoint& pt);
+	virtual double Tangent(FEMaterialPoint& pt) = 0;
 
 	//! create material point data
-	FEMaterialPoint* CreateMaterialPointData() override { return new FETrussMaterialPoint; }
+	FEMaterialPointData* CreateMaterialPointData() override { return new FETrussMaterialPoint; }
+
+	//! material density
+	double Density(FEMaterialPoint& mp);
 
 	// declare the parameter list
 	DECLARE_FECORE_CLASS();
+	FECORE_BASE_CLASS(FETrussMaterial);
+};
+
+//-----------------------------------------------------------------------------
+class FELinearTrussMaterial : public FETrussMaterial
+{
+public:
+	FELinearTrussMaterial(FEModel* fem);
+
+	//! calculate Kirchhoff stress of truss
+	double Stress(FEMaterialPoint& pt) override;
+
+	//! calculate elastic tangent
+	double Tangent(FEMaterialPoint& pt) override;
+
+public:
+	FEParamDouble	m_E;	// Elastic modulus
+	double	m_v;	// Poisson's ratio
+
+	// declare the parameter list
+	DECLARE_FECORE_CLASS();
+};
+
+class FEBIOMECH_API FETrussStress : public FEDomainParameter
+{
+public:
+	FETrussStress();
+	FEParamValue value(FEMaterialPoint& mp) override;
 };

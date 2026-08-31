@@ -32,9 +32,9 @@
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEBinghamFluid, FEViscousFluid)
-ADD_PARAMETER(m_mu, FE_RANGE_GREATER_OR_EQUAL(0.0), "mu");
-ADD_PARAMETER(m_tauy, FE_RANGE_GREATER_OR_EQUAL(0.0), "tauy");
-ADD_PARAMETER(m_n  , FE_RANGE_GREATER_OR_EQUAL(0.0), "n");
+    ADD_PARAMETER(m_mu  , FE_RANGE_GREATER_OR_EQUAL(0.0), "mu"  )->setLongName("shear viscosity");
+    ADD_PARAMETER(m_tauy, FE_RANGE_GREATER_OR_EQUAL(0.0), "tauy")->setLongName("yield stress");
+    ADD_PARAMETER(m_n   , FE_RANGE_GREATER_OR_EQUAL(0.0), "n"   )->setLongName("exponent");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -97,6 +97,18 @@ double FEBinghamFluid::ShearViscosity(FEMaterialPoint& pt)
     double gdot = sqrt(2*(D.sqr()).tr());
     double mu = (gdot > 0) ? m_mu + m_tauy/gdot*(1-exp(-m_n*gdot)) : m_mu + m_tauy*m_n;
     return mu;
+}
+
+double FEBinghamFluid::Tangent_ShearViscosity_StrainRate(FEMaterialPoint& mp)
+{
+	FEFluidMaterialPoint& vt = *mp.ExtractData<FEFluidMaterialPoint>();
+	mat3ds D = vt.RateOfDeformation();
+	double dmu_dgdot = 0;
+	double gdot = sqrt(2 * (D.sqr()).tr());
+	if (gdot > 0) {
+		dmu_dgdot = m_tauy / pow(gdot, 2) * ((1 + m_n * gdot) * exp(-m_n * gdot) - 1);
+	}
+	return dmu_dgdot;
 }
 
 //-----------------------------------------------------------------------------

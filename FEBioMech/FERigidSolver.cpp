@@ -37,9 +37,9 @@ SOFTWARE.*/
 #include <FECore/SparseMatrix.h>
 #include <FECore/log.h>
 #include <FECore/FEMaterial.h>
-#include <FECore/Archive.h>
 #include "FEMechModel.h"
 #include <FECore/FELinearSystem.h>
+#include "FESolidAnalysis.h"
 
 FERigidSolver::FERigidSolver(FEModel* fem)
 {
@@ -150,10 +150,11 @@ void FERigidSolver::PrepStep(const FETimeInfo& timeInfo, vector<double>& ui)
 	for (int i = 0; i<NO; ++i) fem.GetRigidBody(i)->Init();
 
 	// calculate local rigid displacements
-	for (int i = 0; i<fem.RigidPrescribedBCs(); ++i)
+	int NRBC = fem.RigidBCs();
+	for (int i = 0; i < NRBC; ++i)
 	{
-		FERigidBodyDisplacement& DC = *fem.GetRigidPrescribedBC(i);
-		if (DC.IsActive()) DC.InitTimeStep();
+		FERigidBC& rbc = *fem.GetRigidBC(i);
+		if (rbc.IsActive()) rbc.InitTimeStep();
 	}
 
 	// calculate global rigid displacements
@@ -168,6 +169,7 @@ void FERigidSolver::PrepStep(const FETimeInfo& timeInfo, vector<double>& ui)
 				// if all rotation dofs are fixed or prescribed, set the flag
 				if (m_bAllowMixedBCs==false)
 				{
+					RB.m_bpofr = false;
 					if (RB.m_pDC[3] || RB.m_pDC[4] || RB.m_pDC[5])
 					{
 						bool bpofr[3] = { false };
@@ -183,7 +185,7 @@ void FERigidSolver::PrepStep(const FETimeInfo& timeInfo, vector<double>& ui)
 						bool br[3] = { false, false, false };
 						for (int j = 3; j < 6; ++j)
 						{
-							FERigidBodyDisplacement* dc = RB.m_pDC[j];
+							FERigidPrescribedBC* dc = RB.m_pDC[j];
 							if (dc && dc->GetRelativeFlag()) br[j - 3] = true;
 						}
 
@@ -269,39 +271,47 @@ void FERigidSolver::PrepStep(const FETimeInfo& timeInfo, vector<double>& ui)
 		}
 	}
 
-	FEAnalysis* pstep = m_fem->GetCurrentStep();
-	if (pstep->m_nanalysis == FE_DYNAMIC)
-	{
-		FEMesh& mesh = m_fem->GetMesh();
+    for (int i = 0; i<NO; ++i)
+    {
+        FERigidBody& RB = *fem.GetRigidBody(i);
 
-		// set the initial velocities of all rigid nodes
-		for (int i = 0; i<mesh.Nodes(); ++i)
-		{
-			FENode& n = mesh.Node(i);
-			if (n.m_rid >= 0)
-			{
-				FERigidBody& rb = *fem.GetRigidBody(n.m_rid);
-				vec3d V = rb.m_vt;
-				vec3d W = rb.m_wt;
-				vec3d r = n.m_rt - rb.m_rt;
+        quatd q = RB.GetRotation()*RB.m_qp.Inverse();
+        q.MakeUnit();
 
-				vec3d v = V + (W ^ r);
-				n.m_vp = v;
-				n.set_vec3d(m_dofVX, m_dofVY, m_dofVZ, v);
+        // update RB variables
+        // translation
+        RB.m_rp = RB.m_rt;
+        RB.m_vp = RB.m_vt;
+        RB.m_ap = RB.m_at;
+        // rotation
+        RB.m_qp = RB.GetRotation();
+        RB.m_wp = RB.m_wt;
+        RB.m_alp = RB.m_alt;
+        // angular momentum
+        RB.m_hp = RB.m_ht;
+        RB.m_dhp = RB.m_dht;
+        
+        // rigid body reaction force and moment
+        RB.m_Fp = RB.m_Fr;
+        RB.m_Mp = RB.m_Mr;
 
-				vec3d a = (W ^ V)*2.0 + (W ^ (W ^ r));
-				n.m_ap = n.m_at = a;
-			}
-		}
-	}
-
-	// store the current rigid body reaction forces
-	for (int i = 0; i<fem.RigidBodies(); ++i)
-	{
-		FERigidBody& RB = *fem.GetRigidBody(i);
-		RB.m_Fp = RB.m_Fr;
-		RB.m_Mp = RB.m_Mr;
-	}
+        // estimate RB kinematics at current time
+        double dt = timeInfo.timeIncrement;
+        double beta = timeInfo.beta;
+        double gamma = timeInfo.gamma;
+        double a = 1.0 / (beta*dt);
+        double b = a / dt;
+        double c = 1.0 - 0.5 / beta;
+        // acceleration and velocity of center of mass
+        RB.m_at = RB.m_ap*c - RB.m_vp*a;
+        RB.m_vt = RB.m_vp + (RB.m_at*gamma + RB.m_ap*(1-gamma))*dt;
+        // angular acceleration and velocity of rigid body
+        vec3d vq = q.GetVector()*(2 * tan(q.GetAngle() / 2));  // Cayley transform
+        RB.m_wt = vq*(a*gamma) - RB.m_wp + (RB.m_wp + RB.m_alp*dt / 2.)*(2 - gamma / beta);
+        q.RotateVector(RB.m_wt);
+        RB.m_alt = vq*b - RB.m_wp*a + RB.m_alp*c;
+        q.RotateVector(RB.m_alt);
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -342,32 +352,25 @@ void FERigidSolver::RigidStiffnessSolid(SparseMatrix& K, vector<double>& ui, vec
 
 	if (fem.RigidBodies() == 0) return;
 	if (en.empty()) return;
-    
-    int i, j, k, l, n = (int)en.size();
-    
-    // get nodal DOFS
-    DOFS& fedofs = m_fem->GetDOFS();
-    int MAX_NDOFS = fedofs.GetTotalDOFS();
+
+	int n = (int)en.size();
+
+	// get nodal DOFS
+	DOFS& fedofs = m_fem->GetDOFS();
+	int MAX_NDOFS = fedofs.GetTotalDOFS();
 
 	int ndof = ke.columns() / n;
-    
-    matrix kij(ndof, ndof);
-    matrix KF(ndof, 6);
 
-    double KR[6][6];
-    
-    int *lmi, *lmj;
-    int I, J;
-    
-    vec3d zi, zj;
-    mat3d Zi, Zj;
-    
-   
-    FEMesh& mesh = m_fem->GetMesh();
-    
-    // loop over columns
-    for (j = 0; j<n; ++j)
-    {
+	matrix kij(ndof, ndof);
+	matrix KF(ndof, 6);
+
+	double KR[6][6];
+
+	FEMesh& mesh = m_fem->GetMesh();
+
+	// loop over columns
+	for (int j = 0; j<n; ++j)
+	{
 		if (en[j] >= 0)
 		{
 			FENode& nodej = mesh.Node(en[j]);
@@ -378,18 +381,18 @@ void FERigidSolver::RigidStiffnessSolid(SparseMatrix& K, vector<double>& ui, vec
 				FERigidBody& RBj = *fem.GetRigidBody(nodej.m_rid);
 
 				// get the rigid body equation nrs.
-				lmj = RBj.m_LM;
+				int* lmj = RBj.m_LM;
 
 				// get the relative distance to the center of mass
-				zj = nodej.m_rt - RBj.m_rt;
-				Zj.skew(zj);
+				vec3d zj = nodej.m_rt - RBj.m_rt;
+				mat3d Zj; Zj.skew(zj);
 
 				// loop over rows
-				for (i = 0; i < n; ++i)
+				for (int i = 0; i < n; ++i)
 				{
 					// get the element sub-matrix
-					for (k = 0; k < ndof; ++k)
-						for (l = 0; l < ndof; ++l)
+					for (int k = 0; k < ndof; ++k)
+						for (int l = 0; l < ndof; ++l)
 							kij[k][l] = ke[ndof*i + k][ndof*j + l];
 
 					mat3d Kuu(kij[0][0], kij[0][1], kij[0][2],
@@ -406,97 +409,106 @@ void FERigidSolver::RigidStiffnessSolid(SparseMatrix& K, vector<double>& ui, vec
 							// get the rigid body this node is attached to
 							FERigidBody& RBi = *fem.GetRigidBody(nodei.m_rid);
 
-							lmi = RBi.m_LM;
+							int* lmi = RBi.m_LM;
 
 							// get the relative distance (use alpha rule)
-							zi = (nodei.m_rt - RBi.m_rt)*alpha + (nodei.m_rp - RBi.m_rp)*(1 - alpha);
-							Zi.skew(zi);
+							vec3d zi = (nodei.m_rt - RBi.m_rt)*alpha + (nodei.m_rp - RBi.m_rp)*(1 - alpha);
+							mat3d Zi; Zi.skew(zi);
 
 							mat3d M;
 
 							// Kuu transformation to Krr
-							M = Kuu * alpha;
+							M = Kuu;
 							KR[0][0] = M[0][0]; KR[0][1] = M[0][1]; KR[0][2] = M[0][2];
 							KR[1][0] = M[1][0]; KR[1][1] = M[1][1]; KR[1][2] = M[1][2];
 							KR[2][0] = M[2][0]; KR[2][1] = M[2][1]; KR[2][2] = M[2][2];
 
 
 							// Kuu transformation to Krq
-							M = Kuu * Zj*(-alpha);
+							M = Kuu * Zj*(-1);
 							KR[0][3] = M[0][0]; KR[0][4] = M[0][1]; KR[0][5] = M[0][2];
 							KR[1][3] = M[1][0]; KR[1][4] = M[1][1]; KR[1][5] = M[1][2];
 							KR[2][3] = M[2][0]; KR[2][4] = M[2][1]; KR[2][5] = M[2][2];
 
 
 							// Kuu transformation to Kqr
-							M = Zi * Kuu*alpha;
+							M = Zi * Kuu;
 							KR[3][0] = M[0][0]; KR[3][1] = M[0][1]; KR[3][2] = M[0][2];
 							KR[4][0] = M[1][0]; KR[4][1] = M[1][1]; KR[4][2] = M[1][2];
 							KR[5][0] = M[2][0]; KR[5][1] = M[2][1]; KR[5][2] = M[2][2];
 
 
 							// Kuu transformation to Kqq
-							M = Zi * Kuu*Zj*(-alpha);
+							M = Zi * Kuu*Zj*(-1);
 							KR[3][3] = M[0][0]; KR[3][4] = M[0][1]; KR[3][5] = M[0][2];
 							KR[4][3] = M[1][0]; KR[4][4] = M[1][1]; KR[4][5] = M[1][2];
 							KR[5][3] = M[2][0]; KR[5][4] = M[2][1]; KR[5][5] = M[2][2];
 
 							// add the stiffness components to the Krr matrix
-							for (k = 0; k < 6; ++k)
-								for (l = 0; l < 6; ++l)
+							for (int k = 0; k < 6; ++k)
+								for (int l = 0; l < 6; ++l)
 								{
-									J = lmj[k];
-									I = lmi[l];
+									int J = lmj[k];
+									int I = lmi[l];
 
 									if (I >= 0)
 									{
 										// multiply KR by alpha for alpha rule
-										if (J < -1) F[I] -= KR[l][k] * ui[-J - 2];
+										if (J < -1) {
+											#pragma omp atomic
+											F[I] -= KR[l][k] * ui[-J - 2];
+										}
 										else if (J >= 0) K.add(I, J, KR[l][k]);
 									}
 								}
 
 							// we still need to couple the non-rigid degrees of node i to the
 							// rigid dofs of node j
-							for (k = 3; k < ndof; ++k) {
+							for (int k = 3; k < ndof; ++k) {
 								vec3d kpu(kij[k][0], kij[k][1], kij[k][2]);
-								vec3d m = kpu * alpha;
+								vec3d m = kpu;
 								KF[k][0] = m.x; KF[k][1] = m.y; KF[k][2] = m.z;
-								m = Zj * kpu*alpha;
+								m = Zj * kpu;
 								KF[k][3] = m.x; KF[k][4] = m.y; KF[k][5] = m.z;
 							}
 
-							for (k = 0; k < 6; ++k)
-								for (l = 3; l < ndof; ++l)
+							for (int k = 0; k < 6; ++k)
+								for (int l = 3; l < ndof; ++l)
 								{
-									J = lmj[k];
-									I = elmi[ndof*i + l];
+									int J = lmj[k];
+									int I = elmi[ndof*i + l];
 
 									if (I >= 0)
 									{
 										// multiply KF by alpha for alpha rule
-										if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+										if (J < -1) {
+											#pragma omp atomic
+											F[I] -= KF[l][k] * ui[-J - 2];
+											}
 										else if (J >= 0) K.add(I, J, KF[l][k]);
 									}
 								}
 
 							// now the transpose location
-							for (l = 3; l < ndof; ++l) {
+							for (int l = 3; l < ndof; ++l) {
 								vec3d kup(kij[0][l], kij[1][l], kij[2][l]);
 								vec3d m = Zi * kup;
 								KF[l][0] = kup.x; KF[l][1] = kup.y; KF[l][2] = kup.z;
 								KF[l][3] = m.x; KF[l][4] = m.y; KF[l][5] = m.z;
 							}
 
-							for (k = 0; k < 6; ++k)
-								for (l = 3; l < ndof; ++l)
+							for (int k = 0; k < 6; ++k)
+								for (int l = 3; l < ndof; ++l)
 								{
-									J = elmj[ndof*j + l];
-									I = lmi[k];
+									int J = elmj[ndof*j + l];
+									int I = lmi[k];
 
 									if (I >= 0)
 									{
-										if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+										if (J < -1) {
+											#pragma omp atomic
+											F[I] -= KF[l][k] * ui[-J - 2];
+										}
 										else if (J >= 0) K.add(I, J, KF[l][k]);
 									}
 								}
@@ -508,24 +520,27 @@ void FERigidSolver::RigidStiffnessSolid(SparseMatrix& K, vector<double>& ui, vec
 							// add the stiffness components to the Kfr matrix
 
 							// Kij
-							for (k = 0; k < ndof; ++k) {
+							for (int k = 0; k < ndof; ++k) {
 								vec3d kpu(kij[k][0], kij[k][1], kij[k][2]);
-								vec3d m = kpu * alpha;
+								vec3d m = kpu;
 								KF[k][0] = m.x; KF[k][1] = m.y; KF[k][2] = m.z;
-								m = Zj * kpu*alpha;
+								m = Zj * kpu;
 								KF[k][3] = m.x; KF[k][4] = m.y; KF[k][5] = m.z;
 							}
 
-							for (k = 0; k < 6; ++k)
-								for (l = 0; l < ndof; ++l)
+							for (int k = 0; k < 6; ++k)
+								for (int l = 0; l < ndof; ++l)
 								{
-									J = lmj[k];
-									I = elmi[ndof*i + l];
+									int J = lmj[k];
+									int I = elmi[ndof*i + l];
 
 									if (I >= 0)
 									{
 										// multiply KF by alpha for alpha rule
-										if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+										if (J < -1) {
+											#pragma omp atomic
+											F[I] -= KF[l][k] * ui[-J - 2];
+										}
 										else if (J >= 0) K.add(I, J, KF[l][k]);
 									}
 								}
@@ -536,7 +551,7 @@ void FERigidSolver::RigidStiffnessSolid(SparseMatrix& K, vector<double>& ui, vec
 			else
 			{
 				// loop over rows
-				for (i = 0; i < n; ++i)
+				for (int i = 0; i < n; ++i)
 				{
 					if (en[i] >= 0)
 					{
@@ -548,36 +563,39 @@ void FERigidSolver::RigidStiffnessSolid(SparseMatrix& K, vector<double>& ui, vec
 							FERigidBody& RBi = *fem.GetRigidBody(nodei.m_rid);
 
 							// get the rigid body equation nrs.
-							lmi = RBi.m_LM;
+							int* lmi = RBi.m_LM;
 
 							// get the relative distance (use alpha rule)
-							zi = (nodei.m_rt - RBi.m_rt)*alpha + (nodei.m_rp - RBi.m_rp)*(1 - alpha);
-							Zi.skew(zi);
+							vec3d zi = (nodei.m_rt - RBi.m_rt)*alpha + (nodei.m_rp - RBi.m_rp)*(1 - alpha);
+							mat3d Zi; Zi.skew(zi);
 
 							// get the element sub-matrix
-							for (k = 0; k < ndof; ++k)
-								for (l = 0; l < ndof; ++l)
+							for (int k = 0; k < ndof; ++k)
+								for (int l = 0; l < ndof; ++l)
 									kij[k][l] = ke[ndof*i + k][ndof*j + l];
 
 							// add the stiffness components to the Krf matrix
 
 							// Kij
-							for (k = 0; k < ndof; ++k) {
+							for (int k = 0; k < ndof; ++k) {
 								vec3d kup(kij[0][k], kij[1][k], kij[2][k]);
 								vec3d m = Zi * kup;
 								KF[k][0] = kup.x; KF[k][1] = kup.y; KF[k][2] = kup.z;
 								KF[k][3] = m.x; KF[k][4] = m.y; KF[k][5] = m.z;
 							}
 
-							for (k = 0; k < 6; ++k)
-								for (l = 0; l < ndof; ++l)
+							for (int k = 0; k < 6; ++k)
+								for (int l = 0; l < ndof; ++l)
 								{
-									I = lmi[k];
-									J = elmj[ndof*j + l];
+									int I = lmi[k];
+									int J = elmj[ndof*j + l];
 
 									if (I >= 0)
 									{
-										if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+										if (J < -1) {
+											#pragma omp atomic
+											F[I] -= KF[l][k] * ui[-J - 2];
+										}
 										else if (J >= 0) K.add(I, J, KF[l][k]);
 									}
 								}
@@ -686,28 +704,28 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                     mat3d M;
                     
                     // Kuu transformation
-                    M = (Kuu + Kwu + Kuw + Kww)*alpha;
+                    M = (Kuu + Kwu + Kuw + Kww);
                     KR[0][0] = M[0][0]; KR[0][1] = M[0][1]; KR[0][2] = M[0][2];
                     KR[1][0] = M[1][0]; KR[1][1] = M[1][1]; KR[1][2] = M[1][2];
                     KR[2][0] = M[2][0]; KR[2][1] = M[2][1]; KR[2][2] = M[2][2];
                     
                     
                     // Kuw transformation
-                    M = ((Kuu + Kwu)*Aj + (Kuw + Kww)*Bj)*(-alpha);
+                    M = ((Kuu + Kwu)*Aj + (Kuw + Kww)*Bj)*(-1);
                     KR[0][3] = M[0][0]; KR[0][4] = M[0][1]; KR[0][5] = M[0][2];
                     KR[1][3] = M[1][0]; KR[1][4] = M[1][1]; KR[1][5] = M[1][2];
                     KR[2][3] = M[2][0]; KR[2][4] = M[2][1]; KR[2][5] = M[2][2];
                     
                     
                     // Kwu transformation
-                    M = (Ai*(Kuu + Kuw) + Bi*(Kwu + Kww))*alpha;
+                    M = (Ai*(Kuu + Kuw) + Bi*(Kwu + Kww));
                     KR[3][0] = M[0][0]; KR[3][1] = M[0][1]; KR[3][2] = M[0][2];
                     KR[4][0] = M[1][0]; KR[4][1] = M[1][1]; KR[4][2] = M[1][2];
                     KR[5][0] = M[2][0]; KR[5][1] = M[2][1]; KR[5][2] = M[2][2];
                     
                     
                     // Kww transformation
-                    M = ((Ai*Kuu + Bi*Kwu)*Aj + (Ai*Kuw + Bi*Kww)*Bj)*(-alpha);
+                    M = ((Ai*Kuu + Bi*Kwu)*Aj + (Ai*Kuw + Bi*Kww)*Bj)*(-1);
                     KR[3][3] = M[0][0]; KR[3][4] = M[0][1]; KR[3][5] = M[0][2];
                     KR[4][3] = M[1][0]; KR[4][4] = M[1][1]; KR[4][5] = M[1][2];
                     KR[5][3] = M[2][0]; KR[5][4] = M[2][1]; KR[5][5] = M[2][2];
@@ -722,7 +740,10 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                             if (I >= 0)
                             {
                                 // multiply KR by alpha for alpha rule
-                                if (J < -1) F[I] -= KR[l][k]*ui[-J - 2];
+								if (J < -1) {
+									#pragma omp atomic
+									F[I] -= KR[l][k] * ui[-J - 2];
+								}
                                 else if (J >= 0) K.add(I, J, KR[l][k]);
                             }
                         }
@@ -732,9 +753,9 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                     for (k = 6; k<ndof; ++k) {
                         vec3d kpu(kij[k][0], kij[k][1], kij[k][2]);
                         vec3d kpw(kij[k][3], kij[k][4], kij[k][5]);
-                        vec3d m = (kpu + kpw)*alpha;
+                        vec3d m = (kpu + kpw);
                         KF[k][0] = m.x; KF[k][1] = m.y; KF[k][2] = m.z;
-                        m = (Aj*kpu + Bj*kpw)*alpha;
+                        m = (Aj*kpu + Bj*kpw);
                         KF[k][3] = m.x; KF[k][4] = m.y; KF[k][5] = m.z;
                     }
                     
@@ -747,7 +768,10 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                             if (I >= 0)
                             {
                                 // multiply KF by alpha for alpha rule
-                                if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+								if (J < -1) {
+									#pragma omp atomic
+									F[I] -= KF[l][k] * ui[-J - 2];
+								}
                                 else if (J >= 0) K.add(I, J, KF[l][k]);
                             }
                         }
@@ -770,7 +794,10 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                             
                             if (I >= 0)
                             {
-                                if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+								if (J < -1) {
+									#pragma omp atomic
+									F[I] -= KF[l][k] * ui[-J - 2];
+								}
                                 else if (J >= 0) K.add(I, J, KF[l][k]);
                             }
                         }
@@ -785,9 +812,9 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                     for (k = 0; k<ndof; ++k) {
                         vec3d kpu(kij[k][0], kij[k][1], kij[k][2]);
                         vec3d kpw(kij[k][3], kij[k][4], kij[k][5]);
-                        vec3d m = (kpu + kpw)*alpha;
+                        vec3d m = (kpu + kpw);
                         KF[k][0] = m.x; KF[k][1] = m.y; KF[k][2] = m.z;
-                        m = (Aj*kpu + Bj*kpw)*alpha;
+                        m = (Aj*kpu + Bj*kpw);
                         KF[k][3] = m.x; KF[k][4] = m.y; KF[k][5] = m.z;
                     }
                     
@@ -800,7 +827,10 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                             if (I >= 0)
                             {
                                 // multiply KF by alpha for alpha rule
-                                if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+								if (J < -1) {
+									#pragma omp atomic
+									F[I] -= KF[l][k] * ui[-J - 2];
+								}
                                 else if (J >= 0) K.add(I, J, KF[l][k]);
                             }
                         }
@@ -855,7 +885,10 @@ void FERigidSolver::RigidStiffnessShell(SparseMatrix& K, vector<double>& ui, vec
                             
                             if (I >= 0)
                             {
-                                if (J < -1) F[I] -= KF[l][k] * ui[-J - 2];
+								if (J < -1) {
+									#pragma omp atomic
+									F[I] -= KF[l][k] * ui[-J - 2];
+								}
                                 else if (J >= 0) K.add(I, J, KF[l][k]);
                             }
                         }
@@ -873,63 +906,121 @@ void FERigidSolver::AssembleResidual(int node_id, int dof, double f, vector<doub
 
 	FEMesh& mesh = m_fem->GetMesh();
 	
-    // get the equation number
-    FENode& node = mesh.Node(node_id);
-    int n = node.m_ID[dof];
-    
-    // assemble into global vector
-    if (n >= 0) R[n] += f;
-    else if (node.m_rid >= 0)
-    {
-        // this is a rigid body node
-        FERigidBody& RB = *fem.GetRigidBody(node.m_rid);
-        
-        // get the relative position
-        vec3d a = node.m_rt - RB.m_rt;
-        
-        int* lm = RB.m_LM;
-        if (dof == m_dofX)
-        {
-            if (lm[0] >= 0) R[lm[0]] += f;
-            if (lm[4] >= 0) R[lm[4]] += a.z*f;
-            if (lm[5] >= 0) R[lm[5]] += -a.y*f;
+	// get the equation number
+	FENode& node = mesh.Node(node_id);
+	int n = node.m_ID[dof];
+
+	// assemble into global vector
+	if (n >= 0)
+	{
+		#pragma omp atomic
+		R[n] += f;
+	}
+	else if (node.m_rid >= 0)
+	{
+		// this is a rigid body node
+		FERigidBody& RB = *fem.GetRigidBody(node.m_rid);
+
+		// get the relative position
+		vec3d a = node.m_rt - RB.m_rt;
+
+		int* lm = RB.m_LM;
+		if (dof == m_dofX)
+		{
+			if (lm[0] >= 0) {
+				#pragma omp atomic
+				R[lm[0]] += f;
+			}
+			if (lm[4] >= 0) {
+				#pragma omp atomic
+				R[lm[4]] += a.z * f;
+			}
+			if (lm[5] >= 0) {
+				#pragma omp atomic
+				R[lm[5]] += -a.y * f;
+			}
         }
         else if (dof == m_dofY)
         {
-            if (lm[1] >= 0) R[lm[1]] += f;
-            if (lm[3] >= 0) R[lm[3]] += -a.z*f;
-            if (lm[5] >= 0) R[lm[5]] += a.x*f;
-        }
-        else if (dof == m_dofZ)
-        {
-            if (lm[2] >= 0) R[lm[2]] += f;
-            if (lm[3] >= 0) R[lm[3]] += a.y*f;
-            if (lm[4] >= 0) R[lm[4]] += -a.x*f;
-        }
+			if (lm[1] >= 0) {
+				#pragma omp atomic
+				R[lm[1]] += f;
+			}
+			if (lm[3] >= 0) {
+				#pragma omp atomic
+				R[lm[3]] += -a.z * f;
+			}
+			if (lm[5] >= 0) {
+				#pragma omp atomic
+				R[lm[5]] += a.x * f;
+			}
+		}
+		else if (dof == m_dofZ)
+		{
+			if (lm[2] >= 0) {
+				#pragma omp atomic
+				R[lm[2]] += f;
+			}
+			if (lm[3] >= 0) {
+				#pragma omp atomic
+				R[lm[3]] += a.y * f;
+			}
+			if (lm[4] >= 0) {
+				#pragma omp atomic
+				R[lm[4]] += -a.x * f;
+			}
+		}
 		if (node.HasFlags(FENode::SHELL) && node.HasFlags(FENode::RIGID_CLAMP)) {
-            // get the shell director
-            vec3d d = node.m_dt;
-            vec3d b = a - d;
-            if (dof == m_dofSX)
-            {
-                if (lm[0] >= 0) R[lm[0]] +=  f;
-                if (lm[4] >= 0) R[lm[4]] += b.z*f;
-                if (lm[5] >= 0) R[lm[5]] += -b.y*f;
-            }
-            else if (dof == m_dofSY)
-            {
-                if (lm[1] >= 0) R[lm[1]] +=  f;
-                if (lm[3] >= 0) R[lm[3]] += -b.z*f;
-                if (lm[5] >= 0) R[lm[5]] += b.x*f;
-            }
-            else if (dof == m_dofSZ)
-            {
-                if (lm[2] >= 0) R[lm[2]] +=  f;
-                if (lm[3] >= 0) R[lm[3]] += b.y*f;
-                if (lm[4] >= 0) R[lm[4]] += -b.x*f;
-            }
-        }
-    }
+			// get the shell director
+			vec3d d = node.m_dt;
+			vec3d b = a - d;
+			if (dof == m_dofSX)
+			{
+				if (lm[0] >= 0) {
+					#pragma omp atomic
+					R[lm[0]] += f;
+				}
+				if (lm[4] >= 0) {
+					#pragma omp atomic
+					R[lm[4]] += b.z * f;
+				}
+				if (lm[5] >= 0) {
+					#pragma omp atomic
+					R[lm[5]] += -b.y * f;
+				}
+			}
+			else if (dof == m_dofSY)
+			{
+				if (lm[1] >= 0) {
+					#pragma omp atomic
+					R[lm[1]] += f;
+				}
+				if (lm[3] >= 0) {
+					#pragma omp atomic
+					R[lm[3]] += -b.z * f;
+				}
+				if (lm[5] >= 0) {
+					#pragma omp atomic
+					R[lm[5]] += b.x * f;
+				}
+			}
+			else if (dof == m_dofSZ)
+			{
+				if (lm[2] >= 0) {
+					#pragma omp atomic
+					R[lm[2]] += f;
+				}
+				if (lm[3] >= 0) {
+					#pragma omp atomic
+					R[lm[3]] += b.y * f;
+				}
+				if (lm[4] >= 0) {
+					#pragma omp atomic
+					R[lm[4]] += -b.x * f;
+				}
+			}
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -988,6 +1079,11 @@ void FERigidSolver::RigidMassMatrix(FELinearSystem& LS, const FETimeInfo& timeIn
 	double gamma = timeInfo.gamma;
 	double a = 1. / (beta*dt*dt);
 
+	if (timeInfo.currentTime == 0)
+	{
+		a = alpham = 1;
+	}
+
 	for (int i=0; i<fem.RigidBodies(); ++i)
 	{
 		FERigidBody& RB = *fem.GetRigidBody(i);
@@ -1019,10 +1115,14 @@ void FERigidSolver::RigidMassMatrix(FELinearSystem& LS, const FETimeInfo& timeIn
 
 		// skew-symmetric of angular momentum
 		mat3d hhat;
-		hhat.skew(Jt*RB.m_wt);
+		hhat.skew(RB.m_ht);
 
+        // skew-symmetric angular velocity
+        mat3d Omega; Omega.skew(RB.m_wt);
+        mat3d Dht; Dht.skew(RB.m_dht);
+        
 		// rotational inertia stiffness
-		mat3d K = ((Jt*T)/(beta*dt) - hhat/gamma)*(alpham/dt);
+		mat3d K = ((((Omega*gamma+mat3dd(1./dt))*Jt -  hhat*gamma)/(beta*dt))*T - Dht)*alpham;
 
 		ke[3][3] = K(0, 0); ke[3][4] = K(0, 1); ke[3][5] = K(0, 2);
 		ke[4][3] = K(1, 0); ke[4][4] = K(1, 1); ke[4][5] = K(1, 2);
@@ -1148,17 +1248,20 @@ void FERigidSolverOld::UpdateRigidBodies(vector<double>& Ui, vector<double>& ui,
 
 	// for prescribed displacements, the displacement increments are evaluated differently
 	// TODO: Is this really necessary? Why can't the ui vector contain the correct values?
-	const int NRD = fem.RigidPrescribedBCs();
-	for (int i = 0; i<NRD; ++i)
+	for (int i = 0; i < NRB; ++i)
 	{
-		FERigidBodyDisplacement& dc = *fem.GetRigidPrescribedBC(i);
-		if (dc.IsActive())
+		// get the rigid body
+		FERigidBody& RB = *fem.GetRigidBody(i);
+		if (RB.m_prb == nullptr)
 		{
-			FERigidBody& RB = *fem.GetRigidBody(dc.GetID());
-			if (RB.m_prb == 0)
+			for (int j = 0; j < 6; ++j)
 			{
-				int I = dc.GetBC();
-				RB.m_du[I] = dc.Value() - RB.m_Up[I];
+				FERigidPrescribedBC* dc = RB.m_pDC[j];
+				if (dc && dc->IsActive())
+				{
+					int I = dc->GetBC();
+					RB.m_du[I] = dc->Value() - RB.m_Up[I];
+				}
 			}
 		}
 	}
@@ -1298,10 +1401,9 @@ void FERigidSolverNew::UpdateRigidBodies(vector<double>& Ui, vector<double>& ui)
 		// first do the displacements
 		if (RB.m_prb == 0)
 		{
-			FERigidBodyDisplacement* pdc;
 			for (int j = 0; j<3; ++j)
 			{
-				pdc = RB.m_pDC[j];
+				FERigidPrescribedBC* pdc = RB.m_pDC[j];
 				if (pdc)
 				{
 					// TODO: do I need to take the line search step into account here?
@@ -1371,12 +1473,48 @@ void FERigidSolverNew::UpdateRigidBodies(vector<double>& Ui, vector<double>& ui)
 		}
 	}
 
+    // Newmark rule
+    FETimeInfo& timeInfo = GetFEModel()->GetTime();
+    double alpham = timeInfo.alpham;
+    double beta = timeInfo.beta;
+    double gamma = timeInfo.gamma;
+    double dt = timeInfo.timeIncrement;
+    double a = 1.0 / (beta*dt);
+    double b = a / dt;
+    double c = 1.0 - 0.5 / beta;
+    
+    for (int i = 0; i<nrb; ++i)
+    {
+        // get the rigid body
+        FERigidBody& RB = *fem.GetRigidBody(i);
+        
+        // acceleration and velocity of center of mass
+        RB.m_at = (RB.m_rt - RB.m_rp)*b - RB.m_vp*a + RB.m_ap*c;
+        RB.m_vt = RB.m_vp + (RB.m_ap*(1.0 - gamma) + RB.m_at*gamma)*dt;
+        // angular acceleration and velocity of rigid body
+        quatd q = RB.GetRotation()*RB.m_qp.Inverse();
+        q.MakeUnit();
+        vec3d vq = q.GetVector()*(2 * tan(q.GetAngle() / 2));  // Cayley transform
+        RB.m_wt = vq*(a*gamma) - RB.m_wp + (RB.m_wp + RB.m_alp*dt / 2.)*(2 - gamma / beta);
+        q.RotateVector(RB.m_wt);
+        RB.m_alt = vq*b - RB.m_wp*a + RB.m_alp*c;
+        q.RotateVector(RB.m_alt);
+        
+        // evaluate mass moment of inertia at t
+        mat3d Rt = RB.GetRotation().RotationMatrix();
+        mat3ds Jt = (Rt*RB.m_moi*Rt.transpose()).sym();
+        // evaluate angular momentum and its rate of change at current time
+        RB.m_ht = Jt*RB.m_wt;
+        RB.m_dht = (RB.m_ht - RB.m_hp)/(gamma*dt) + RB.m_dhp*(1-1./gamma);
+    }
+    
 	// update the mesh' nodes
 	fem.UpdateRigidMesh();
 
 	// Since the rigid nodes are repositioned we need to update the displacement DOFS
 	FEMesh& mesh = m_fem->GetMesh();
 	int N = mesh.Nodes();
+#pragma omp parallel for schedule(dynamic, 64)
 	for (int i = 0; i<N; ++i)
 	{
 		FENode& node = mesh.Node(i);
@@ -1398,82 +1536,16 @@ void FERigidSolverNew::UpdateRigidBodies(vector<double>& Ui, vector<double>& ui)
 }
 
 //-----------------------------------------------------------------------------
-//! evaluate body forces
-void FERigidSolverNew::BodyForces(FEGlobalVector& R, const FETimeInfo& timeInfo, FEBodyForce& pbf)
-{
-	if (m_fem == nullptr) return;
-	FEMechModel& fem = *m_fem;
-
-	int nrb = fem.RigidBodies();
-    
-    // calculate body forces on rigid bodies
-    for (int i = 0; i<nrb; ++i)
-    {
-        FERigidBody& RB = *fem.GetRigidBody(i);
-        
-        // 3 translation dofs of rigid body needed for body force
-        vector<double> fe(3);
-        vector<int>	LM(3);
-        
-        // create a material point to evaluate the body force
-        FEElasticMaterialPoint mp;
-        mp.m_r0 = RB.m_r0;
-        mp.m_rt = RB.m_rt;
-		mp.m_F = RB.GetRotation().RotationMatrix();
-        
-        // body force = mass*body force per mass (recall that body forces are negated in FEBio)
-        vec3d F = pbf.force(mp)*(-RB.m_mass);
-        
-        fe[0] = F.x;
-        fe[1] = F.y;
-        fe[2] = F.z;
-        
-        // pack the equation numbers
-        LM[0] = RB.m_LM[0];
-        LM[1] = RB.m_LM[1];
-        LM[2] = RB.m_LM[2];
-        R.Assemble(LM, fe);
-        
-        // add to rigid body force
-        RB.m_Fr += F;
-    }
-}
-
-//-----------------------------------------------------------------------------
 //! evaluate inertia forces
 void FERigidSolverNew::InertialForces(FEGlobalVector& R, const FETimeInfo& timeInfo)
 {
 	// Newmark rule
     double alpham = timeInfo.alpham;
-    double beta = timeInfo.beta;
-    double gamma = timeInfo.gamma;
-	double dt = timeInfo.timeIncrement;
-	double a = 1.0 / (beta*dt);
-	double b = a / dt;
-	double c = 1.0 - 0.5 / beta;
 
 	if (m_fem == nullptr) return;
 	FEMechModel& fem = *m_fem;
 
 	int nrb = fem.RigidBodies();
-	for (int i = 0; i<nrb; ++i)
-	{
-		// get the rigid body
-		FERigidBody& RB = *fem.GetRigidBody(i);
-
-		// acceleration and velocity of center of mass
-		RB.m_at = (RB.m_rt - RB.m_rp)*b - RB.m_vp*a + RB.m_ap*c;
-		RB.m_vt = RB.m_vp + (RB.m_ap*(1.0 - gamma) + RB.m_at*gamma)*dt;
-		// angular acceleration and velocity of rigid body
-		quatd q = RB.GetRotation()*RB.m_qp.Inverse();
-		q.MakeUnit();
-		vec3d vq = q.GetVector()*(2 * tan(q.GetAngle() / 2));  // Cayley transform
-		RB.m_wt = vq*(a*gamma) - RB.m_wp + (RB.m_wp + RB.m_alp*dt / 2.)*(2 - gamma / beta);
-		q.RotateVector(RB.m_wt);
-		RB.m_alt = vq*b - RB.m_wp*a + RB.m_alp*c;
-		q.RotateVector(RB.m_alt);
-	}
-
 	// calculate rigid body inertial forces
 	for (int i = 0; i<nrb; ++i)
 	{
@@ -1496,8 +1568,7 @@ void FERigidSolverNew::InertialForces(FEGlobalVector& R, const FETimeInfo& timeI
         RB.m_ht = Jt*RB.m_wt;
 
 		// evaluate rate of change of angular momentum
-		RB.m_dht = (RB.m_ht - RB.m_hp) / (gamma*dt) + RB.m_dhp*(1-1.0/gamma);
-//        RB.m_dht = (RB.m_wt ^ RB.m_ht) + Jt*RB.m_alt;
+        RB.m_dht = (RB.m_wt ^ RB.m_ht) + Jt*RB.m_alt;
 
         vec3d M = (RB.m_dht*alpham + RB.m_dhp*(1-alpham));
 

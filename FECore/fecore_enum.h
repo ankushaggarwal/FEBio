@@ -50,7 +50,7 @@ enum FE_Element_Class {
 // Element shapes:
 // This defines the general element shape classes. This classification differs from the
 // element types below, in that the latter is defined by a shape and integration rule.
-// Do not change the order of these enums!
+// Do not change the order of these enums! (NOTE: why??)
 enum FE_Element_Shape {
 	// 3D elements
 	ET_TET4,
@@ -78,6 +78,7 @@ enum FE_Element_Shape {
 	// line elements
 	ET_TRUSS2,
 	ET_LINE2,
+	ET_LINE3,
 	ET_DISCRETE,
 
 	FE_ELEM_INVALID_SHAPE = 999
@@ -121,6 +122,7 @@ enum FE_Element_Type {
 
 	// 2.5D surface elements
 	FE_QUAD4G4,
+	FE_QUAD4G16,
 	FE_QUAD4NI,
 	FE_TRI3G1,
 	FE_TRI3G3,
@@ -144,10 +146,12 @@ enum FE_Element_Type {
     FE_QUAD9NI,
 
 	// shell elements
+    FE_SHELL_QUAD4G4,
     FE_SHELL_QUAD4G8,
     FE_SHELL_QUAD4G12,
     FE_SHELL_QUAD8G18,
     FE_SHELL_QUAD8G27,
+    FE_SHELL_TRI3G3,
     FE_SHELL_TRI3G6,
     FE_SHELL_TRI3G9,
     FE_SHELL_TRI6G14,
@@ -168,6 +172,12 @@ enum FE_Element_Type {
 
 	// line elements
 	FE_LINE2G1,
+	FE_LINE2NI,
+
+	// beam elements
+	FE_BEAM2G1,
+	FE_BEAM2G2,
+	FE_BEAM3G2,
 
 	// unspecified
 	FE_ELEM_INVALID_TYPE = 0xFFFF
@@ -229,64 +239,52 @@ enum SUPER_CLASS_ID {
 	FETASK_ID,                   	// derived from FECoreTask
 	FESOLVER_ID,                 	// derived from FESolver
 	FEMATERIAL_ID,               	// derived from FEMaterial
-	FEBODYLOAD_ID,               	// derived from FEBodyLoad
-	FESURFACELOAD_ID,            	// derived from FESurfaceLoad
-	FEEDGELOAD_ID,					// derived from FEEdgeLoad
-	FENODALLOAD_ID,					// derived from FENodalLoad
+	FEMATERIALPROP_ID,				// derived from FEMaterialProperty
+	FEDISCRETEMATERIAL_ID,			// derived from FEDiscreteMaterial
+	FELOAD_ID,               	    // derived from FEModelLoad
 	FENLCONSTRAINT_ID,           	// derived from FENLConstraint
 	FEPLOTDATA_ID,               	// derived from FEPlotData
 	FEANALYSIS_ID,               	// derived from FEAnalysis
-	FESURFACEPAIRINTERACTION_ID, 	// derived from FESurfacePairInteraction
-	FENODELOGDATA_ID,            	// derived from FENodeLogData
-	FEFACELOGDATA_ID,				// derived from FEFaceLogData
-	FEELEMLOGDATA_ID,            	// derived from FELogElemata
-	FEOBJLOGDATA_ID,            	// derived from FELogObjectData
-	FEMODELLOGDATA_ID,            	// derived from FEModelLogData
-	FEBC_ID,						// derived from FEBoundaryCondition (TODO: This does not work yet)
+	FESURFACEINTERACTION_ID, 		// derived from FESurfaceInterface
+	FELOGNODEDATA_ID,            	// derived from FELogNodeData
+	FELOGFACEDATA_ID,            	// derived from FELogFaceData
+	FELOGELEMDATA_ID,            	// derived from FELogElemData
+	FELOGOBJECTDATA_ID,            	// derived from FELogObjectData
+	FELOGDOMAINDATA_ID,            	// derived from FELogDomainData
+	FELOGNLCONSTRAINTDATA_ID,      	// derived from FELogNLConstraintData
+	FELOGSURFACEDATA_ID,      		// derived from FELogSurfaceData
+	FELOGMODELDATA_ID,            	// derived from FEModelLogData
+	FEBC_ID,						// derived from FEBoundaryCondition
 	FEGLOBALDATA_ID,				// derived from FEGlobalData
-	FERIGIDOBJECT_ID,				// derived from FECoreBase (TODO: work in progress)
-	FENLCLOGDATA_ID,             	// derived from FELogNLConstraintData
 	FECALLBACK_ID,					// derived from FECallBack
-	FEDOMAIN_ID,					// derived from FEDomain (TODO: work in progress)
-	FEIC_ID,						// derived from initial condition
-	FEDATAGENERATOR_ID,				// derived from FEDataGenerator
-	FELOADCONTROLLER_ID,			// derived from FELoadContoller (TODO: work in progress)
+	FESOLIDDOMAIN_ID,				// derived from FESolidDomain
+	FESHELLDOMAIN_ID,				// derived from FEShellDomain
+	FEBEAMDOMAIN_ID,				// derived from FEBeamDomain
+	FEDISCRETEDOMAIN_ID,			// derived from FEDiscreteDomain
+	FEDOMAIN2D_ID,					// derived from FEDomain2D
+	FESURFACE_ID,					// derived from FESurface
+	FEEDGE_ID,						// derived from FEEdge
+	FEIC_ID,						// derived from FEInitialCondition
+	FEMESHDATAGENERATOR_ID,			// derived from FEMeshDataGenerator
+	FELOADCONTROLLER_ID,			// derived from FELoadContoller
 	FEMODEL_ID,						// derived from FEModel (TODO: work in progress)
-	FEMODELDATA_ID,					// derived from FEModelData (TODO: work in progress)
-	FESCALARGENERATOR_ID,			// derived from FEScalarValuator (TODO: work in progress)
-	FEVECTORGENERATOR_ID,			// derived from FEVectorValuator (NOTE: work in progress!)
-	FEMAT3DGENERATOR_ID,			// derived from FEMAT3DValuator (NOTE: work in progress!)
-	FEMAT3DSGENERATOR_ID,			// derived from FEMAT3DSValuator (NOTE: work in progress!)
-	FEFUNCTION1D_ID,				// derived from FEFunction1D (TODO: work in progress)
+	FESCALARVALUATOR_ID,			// derived from FEScalarValuator
+	FEVEC3DVALUATOR_ID,				// derived from FEVectorValuator
+	FEMAT3DVALUATOR_ID,				// derived from FEMAT3DValuator
+	FEMAT3DSVALUATOR_ID,			// derived from FEMAT3DSValuator
+	FEFUNCTION1D_ID,				// derived from FEFunction1D
 	FELINEARSOLVER_ID,				// derived from LinearSolver
 	FEMESHADAPTOR_ID,				// derived from FEMeshAdaptor
 	FEMESHADAPTORCRITERION_ID,		// derived from FEMeshAdaptorCriterion
-	FERIGIDBC_ID,					// derived from FERigidBC
 	FENEWTONSTRATEGY_ID,			// derived from FENewtonStrategy
-	FEITEMLIST_ID,                  // derived from FEItemList (NOTE: work in progress!)
 	FETIMECONTROLLER_ID,			// derived from FETimeStepController
 	FEEIGENSOLVER_ID,				// derived from EigenSolver
-    FESURFACEPAIRINTERACTIONNL_ID,  // derived from FESurfacePairInteraction
-	FELOGSURFACEDATA_ID,			// derived from FELogSurfaceData
-	FELOGDOMAINDATA_ID				// derived from FELogDomainData
-};
-
-///////////////////////////////////////////////////////////////////////////////
-// ENUM: Analysis types
-//  Types of analysis that can be performed
-// TODO: Make this a FESolver attribute
-enum FE_Analysis_Type {
-	FE_STATIC		= 0,
-	FE_DYNAMIC		= 1,
-	FE_STEADY_STATE	= 2
-};
-
-///////////////////////////////////////////////////////////////////////////////
-// ENUM: rigid surfaces
-
-enum FE_Rigid_Surface_Type {
-	FE_RIGID_PLANE,
-	FE_RIGID_SPHERE
+	FEDATARECORD_ID,				// derived from DataRecord
+	FECLASS_ID,						// derived from FECoreClass
+	FESCRIPT_ID,					// derived from FEScriptedBehavior
+	FELOGNODEDEFINITION_ID,			// derived from FELogNodeDefinition
+	FELOGFACEDEFINITION_ID,			// derived from FELogFaceDefinition
+	FELOGELEMDEFINITION_ID,			// derived from FELogElemDefinition
 };
 
 //-----------------------------------------------------------------------------
@@ -322,15 +320,13 @@ enum FE_Output_Level {
 //-----------------------------------------------------------------------------
 //! Domain classes
 //! The domain class defines the general catergory of element types
-//! NOTE: beams are not supported yet.
 #define	FE_DOMAIN_SOLID		1
 #define	FE_DOMAIN_SHELL		2
 #define	FE_DOMAIN_BEAM		3
 #define	FE_DOMAIN_SURFACE	4
-#define	FE_DOMAIN_TRUSS		5
-#define	FE_DOMAIN_DISCRETE	6
-#define	FE_DOMAIN_2D		7
-#define FE_DOMAIN_EDGE		8
+#define	FE_DOMAIN_DISCRETE	5
+#define	FE_DOMAIN_2D		6
+#define FE_DOMAIN_EDGE		7
 
 // --- data types ---
 enum Var_Type { 
@@ -379,3 +375,12 @@ enum Matrix_Type {
 	REAL_SYMMETRIC,				// symmetric (not necessarily positive definite)
 	REAL_SYMM_STRUCTURE			// structurally symmetric
 };
+
+//! Constraint enforcement method
+namespace FECore {
+	enum CONSTRAINT_ENFORCEMENT {
+		PENALTY_METHOD,
+		AUGLAG_METHOD,
+		LAGMULT_METHOD
+	};
+}

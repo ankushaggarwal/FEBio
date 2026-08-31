@@ -42,7 +42,7 @@ FEMultiphasicMultigeneration::FEMultiphasicMultigeneration(FEModel* pfem) : FEMu
 }
 
 //-----------------------------------------------------------------------------
-FEMaterialPoint* FEMultiphasicMultigeneration::CreateMaterialPointData()
+FEMaterialPointData* FEMultiphasicMultigeneration::CreateMaterialPointData()
 {
 	return new FEMultigenSBMMaterialPoint
     (this, new FESolutesMaterialPoint
@@ -72,7 +72,7 @@ double FEMultiphasicMultigeneration::GetGenerationTime(const int igen)
 //-----------------------------------------------------------------------------
 void FEMultiphasicMultigeneration::UpdateSolidBoundMolecules(FEMaterialPoint& mp)
 {
-    double dt = GetFEModel()->GetTime().timeIncrement;
+    double dt = CurrentTimeIncrement();
     
     // check if this mixture includes chemical reactions
     int nreact = (int)Reactions();
@@ -131,8 +131,8 @@ void FEMultiphasicMultigeneration::UpdateSolidBoundMolecules(FEMaterialPoint& mp
                     spt.m_sbmr[isbm] += dsbmr;
                     
                     // check bounds
-                    if ((GetSBM(isbm)->m_rhomax > 0) && (spt.m_sbmr[isbm] > GetSBM(isbm)->m_rhomax)) {
-                        dsbmr = GetSBM(isbm)->m_rhomax - spt.m_sbmr[isbm];
+                    if ((spt.m_sbmrmax[isbm] > 0) && (spt.m_sbmr[isbm] > spt.m_sbmrmax[isbm])) {
+                        dsbmr = spt.m_sbmrmax[isbm] - spt.m_sbmr[isbm];
                         mpt.m_gsbmr[ngen-1][isbm] += dsbmr;
                         spt.m_sbmr[isbm] += dsbmr;
                     }
@@ -150,8 +150,8 @@ void FEMultiphasicMultigeneration::UpdateSolidBoundMolecules(FEMaterialPoint& mp
                     spt.m_sbmr[isbm] += dsbmr;
                     
                     // check bounds
-                    if (spt.m_sbmr[isbm] < GetSBM(isbm)->m_rhomin) {
-                        dsbmr = GetSBM(isbm)->m_rhomin - spt.m_sbmr[isbm];
+                    if (spt.m_sbmr[isbm] < spt.m_sbmrmin[isbm]) {
+                        dsbmr = spt.m_sbmrmin[isbm] - spt.m_sbmr[isbm];
                         for (int igen=0; igen<ngen; ++igen)
                             mpt.m_gsbmr[igen][isbm] += mf[igen]*dsbmr;
                         spt.m_sbmr[isbm] += dsbmr;
@@ -183,8 +183,8 @@ void FEMultiphasicMultigeneration::UpdateSolidBoundMolecules(FEMaterialPoint& mp
                     spt.m_sbmr[isbm] += dsbmr;
                     
                     // check bounds
-                    if ((GetSBM(isbm)->m_rhomax > 0) && (spt.m_sbmr[isbm] > GetSBM(isbm)->m_rhomax)) {
-                        dsbmr = GetSBM(isbm)->m_rhomax - spt.m_sbmr[isbm];
+                    if ((spt.m_sbmrmax[isbm] > 0) && (spt.m_sbmr[isbm] > spt.m_sbmrmax[isbm])) {
+                        dsbmr = spt.m_sbmrmax[isbm] - spt.m_sbmr[isbm];
                         mpt.m_gsbmr[ngen-1][isbm] += dsbmr;
                         spt.m_sbmr[isbm] += dsbmr;
                     }
@@ -202,8 +202,8 @@ void FEMultiphasicMultigeneration::UpdateSolidBoundMolecules(FEMaterialPoint& mp
                     spt.m_sbmr[isbm] += dsbmr;
                     
                     // check bounds
-                    if (spt.m_sbmr[isbm] < GetSBM(isbm)->m_rhomin) {
-                        dsbmr = GetSBM(isbm)->m_rhomin - spt.m_sbmr[isbm];
+                    if (spt.m_sbmr[isbm] < spt.m_sbmrmin[isbm]) {
+                        dsbmr = spt.m_sbmrmin[isbm] - spt.m_sbmr[isbm];
                         for (int igen=0; igen<ngen; ++igen)
                             mpt.m_gsbmr[igen][isbm] += mf[igen]*dsbmr;
                         spt.m_sbmr[isbm] += dsbmr;
@@ -219,7 +219,7 @@ void FEMultiphasicMultigeneration::UpdateSolidBoundMolecules(FEMaterialPoint& mp
 //=============================================================================
 
 //-----------------------------------------------------------------------------
-FEMaterialPoint* FEMultigenSBMMaterialPoint::Copy()
+FEMaterialPointData* FEMultigenSBMMaterialPoint::Copy()
 {
 	FEMultigenSBMMaterialPoint* pt = new FEMultigenSBMMaterialPoint(*this);
     pt->m_ngen = m_ngen;
@@ -238,7 +238,7 @@ FEMaterialPoint* FEMultigenSBMMaterialPoint::Copy()
 //-----------------------------------------------------------------------------
 void FEMultigenSBMMaterialPoint::Serialize(DumpStream& ar)
 {
-	FEMaterialPoint::Serialize(ar);
+	FEMaterialPointData::Serialize(ar);
     ar & m_ngen & m_nsbm & m_tgen;
 	ar & m_Fi;
 	ar & m_Ji;
@@ -249,7 +249,7 @@ void FEMultigenSBMMaterialPoint::Serialize(DumpStream& ar)
 //-----------------------------------------------------------------------------
 void FEMultigenSBMMaterialPoint::Init()
 {
-	FEMaterialPoint::Init();
+	FEMaterialPointData::Init();
     
 	m_Fi.clear();
 	m_Ji.clear();
@@ -270,7 +270,7 @@ void FEMultigenSBMMaterialPoint::Init()
 //-----------------------------------------------------------------------------
 void FEMultigenSBMMaterialPoint::Update(const FETimeInfo& timeInfo)
 {
-	FEMaterialPoint::Update(timeInfo);
+	FEMaterialPointData::Update(timeInfo);
 
 	// get the time
 	double t = timeInfo.currentTime;

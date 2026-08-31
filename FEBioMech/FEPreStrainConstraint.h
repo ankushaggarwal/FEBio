@@ -25,7 +25,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #pragma once
 #include <FECore/FENLConstraint.h>
-#include <FECore/FEModel.h>
 #include <FECore/FESolidDomain.h>
 #include "FEPreStrainElastic.h"
 #include "FEPreStrainUncoupledElastic.h"
@@ -40,7 +39,6 @@ public:
 	virtual mat3d UpdateFc(const mat3d& F, const mat3d& Fc_prev, FEMaterialPoint& mp, FEPrestrainMaterial* pmat) = 0;
 
 public:
-	bool Init() override;
 	bool Augment(int naug, const FETimeInfo& tp) override;
 
 	void LoadVector(FEGlobalVector& R, const FETimeInfo& tp) override {};
@@ -50,7 +48,7 @@ public:
 	void BuildMatrixProfile(FEGlobalMatrix& M) override {}
 
 private:
-	bool Augment(FESolidDomain* pdom, int n, int naug);
+	bool Augment(FEDomain* pdom, int n, int naug);
 
 public:
 	bool	m_laugon;	//!< augmented Lagrangian flag

@@ -31,4 +31,13 @@ class FECORE_API FELogEnclosedVolume : public FELogSurfaceData
 public:
     FELogEnclosedVolume(FEModel* fem) : FELogSurfaceData(fem) {}
     double value(FESurface& surface) override;
+
+    DECLARE_FECORE_CLASS();
+};
+
+class FELogEnclosedVolumeChange : public FELogSurfaceData
+{
+public:
+	FELogEnclosedVolumeChange(FEModel* fem) : FELogSurfaceData(fem) {}
+	double value(FESurface& surface) override;
 };

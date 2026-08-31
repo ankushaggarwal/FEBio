@@ -28,8 +28,8 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FGMRESSolver.h"
-#include "CompactSymmMatrix.h"
-#include "CompactUnSymmMatrix.h"
+#include <FECore/CompactSymmMatrix.h>
+#include <FECore/CompactUnSymmMatrix.h>
 #include <FECore/log.h>
 #include "MatrixTools.h"
 
@@ -53,8 +53,8 @@ BEGIN_FECORE_CLASS(FGMRESSolver, IterativeLinearSolver)
 	ADD_PARAMETER(m_abstol        , "abs_tol");
 	ADD_PARAMETER(m_maxIterFail   , "fail_max_iters");
 
-	ADD_PROPERTY(m_P, "pc_left");
-	ADD_PROPERTY(m_R, "pc_right");
+	ADD_PROPERTY(m_P, "pc_left")->SetFlags(FEProperty::Optional);
+	ADD_PROPERTY(m_R, "pc_right")->SetFlags(FEProperty::Optional);
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -81,14 +81,14 @@ FGMRESSolver::FGMRESSolver(FEModel* fem) : IterativeLinearSolver(fem), m_pA(0)
 // set the preconditioner
 void FGMRESSolver::SetLeftPreconditioner(LinearSolver* P)
 {
-	m_P = P;
+	m_P = dynamic_cast<Preconditioner*>(P);
 }
 
 //-----------------------------------------------------------------------------
 //! Set the right preconditioner
 void FGMRESSolver::SetRightPreconditioner(LinearSolver* R)
 {
-	m_R = R;
+	m_R = dynamic_cast<Preconditioner*>(R);
 }
 
 //-----------------------------------------------------------------------------

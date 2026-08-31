@@ -27,7 +27,7 @@
 
 
 #pragma once
-#include "FEAugLagLinearConstraint.h"
+#include <FECore/FEAugLagLinearConstraint.h>
 #include <FECore/FESurface.h>
 #include <FECore/FEModelParam.h>
 
@@ -35,7 +35,7 @@
 //! The FEFixedNormalDisplacement class implements a linear constraint for fixing the normal component
 //! of the solid displacement.
 
-class FEFixedNormalDisplacement : public FELinearConstraintSet
+class FEFixedNormalDisplacement : public FESurfaceConstraint
 {
 public:
     //! constructor
@@ -49,6 +49,35 @@ public:
     
     //! initialization
     bool Init() override;
+
+    // allocate equations
+    int InitEquations(int neq) override;
+
+	// we don't use nodal integration for this constraint
+	bool UseNodalIntegration() override { return false; };
+    
+protected:
+    void Update(const std::vector<double>& Ui, const std::vector<double>& ui) override;
+    void UpdateIncrements(std::vector<double>& Ui, const std::vector<double>& ui) override;
+    
+    void PrepStep() override;
+    
+public:
+    //! serialize data to archive
+    void Serialize(DumpStream& ar) override;
+
+    //! add the linear constraint contributions to the residual
+    void LoadVector(FEGlobalVector& R, const FETimeInfo& tp) override;
+
+    //! add the linear constraint contributions to the stiffness matrix
+    void StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp) override;
+
+    //! do the augmentation
+    bool Augment(int naug, const FETimeInfo& tp) override;
+
+    //! build connectivity for matrix profile
+    void BuildMatrixProfile(FEGlobalMatrix& M) override;
+
     
     //! Get the surface
     FESurface* GetSurface() override { return &m_surf; }
@@ -59,6 +88,9 @@ protected:
     
 public:
     bool            m_bshellb;
+
+private:
+    FELinearConstraintSet   m_lc;
 
     DECLARE_FECORE_CLASS();
 };

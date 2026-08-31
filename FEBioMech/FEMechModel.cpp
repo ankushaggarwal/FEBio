@@ -65,6 +65,16 @@ void FEMechModel::Clear()
 }
 
 //-----------------------------------------------------------------------------
+bool FEMechModel::Init()
+{
+	// create and initialize the rigid bodies
+	if (InitRigidSystem() == false) return false;
+
+	// initialize the rest of the model
+	return FEModel::Init();
+}
+
+//-----------------------------------------------------------------------------
 // number of rigid bodies
 int FEMechModel::RigidBodies() const
 {
@@ -85,13 +95,6 @@ FERigidBody* FEMechModel::GetRigidBody(int n)
 }
 
 //-----------------------------------------------------------------------------
-// find a rigid surface
-FERigidSurface* FEMechModel::FindRigidSurface(const std::string& name)
-{
-	return m_prs->FindRigidSurface(name);
-}
-
-//-----------------------------------------------------------------------------
 // find a rigid body from a material ID
 int FEMechModel::FindRigidbodyFromMaterialID(int matId)
 {
@@ -105,31 +108,24 @@ int FEMechModel::FindRigidbodyFromMaterialID(int matId)
 }
 
 //-----------------------------------------------------------------------------
-// return number or rigid prescribed BCs
-int FEMechModel::RigidPrescribedBCs() const
+// return number or rigid BCs
+int FEMechModel::RigidBCs() const
 {
-	return m_prs->PrescribedBCs();
+	return m_prs->RigidBCs();
 }
 
 //-----------------------------------------------------------------------------
-// return the rigid prescribed displacement
-FERigidBodyDisplacement* FEMechModel::GetRigidPrescribedBC(int i)
+// return the rigid displacement
+FERigidBC* FEMechModel::GetRigidBC(int i)
 {
-	return m_prs->PrescribedBC(i);
+	return m_prs->RigidBC(i);
 }
 
 //-----------------------------------------------------------------------------
 // add a rigid presribed BC
-void FEMechModel::AddRigidPrescribedBC(FERigidBodyDisplacement* pDC)
+void FEMechModel::AddRigidBC(FERigidBC* pDC)
 {
-	m_prs->AddPrescribedBC(pDC);
-}
-
-//-----------------------------------------------------------------------------
-// add a rigid fixed BC
-void FEMechModel::AddRigidFixedBC(FERigidBodyFixedBC* pBC)
-{
-	m_prs->AddFixedBC(pBC);
+	m_prs->AddRigidBC(pDC);
 }
 
 //-----------------------------------------------------------------------------
@@ -137,13 +133,6 @@ void FEMechModel::AddRigidFixedBC(FERigidBodyFixedBC* pBC)
 void FEMechModel::AddRigidInitialCondition(FERigidIC* pIC)
 {
 	m_prs->AddInitialCondition(pIC);
-}
-
-//-----------------------------------------------------------------------------
-// add a rigid nodeset
-void FEMechModel::AddRigidNodeSet(FERigidNodeSet* rns)
-{
-	m_prs->AddRigidNodeSet(rns);
 }
 
 //-----------------------------------------------------------------------------
@@ -171,11 +160,18 @@ bool FEMechModel::Reset()
 }
 
 //-----------------------------------------------------------------------------
+bool FEMechModel::InitMesh()
+{
+	if (FEModel::InitMesh() == false) return false;
+	return m_prs->InitRigidBodies();
+}
+
+//-----------------------------------------------------------------------------
 //! Initialize shells
-void FEMechModel::InitShells()
+bool FEMechModel::InitShells()
 {
 	// Base class does most of the work
-	FEModel::InitShells();
+	if (!FEModel::InitShells()) return false;
 
 	// NOTE: This was moved here because I wanted to FEMaterial::IsRigid to FESolidMaterial::IsRigid
 	//       This was part of the move to rid the FECore library of rigid stuff
@@ -210,6 +206,8 @@ void FEMechModel::InitShells()
 			}
 		}
 	}
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------

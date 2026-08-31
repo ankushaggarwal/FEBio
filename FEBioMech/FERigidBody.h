@@ -35,7 +35,7 @@ SOFTWARE.*/
 
 //-----------------------------------------------------------------------------
 class FEModel;
-class FERigidBodyDisplacement;
+class FERigidPrescribedBC;
 
 //-----------------------------------------------------------------------------
 //! rigid body class
@@ -44,7 +44,8 @@ class FERigidBodyDisplacement;
 //!       materials.
 class FEBIOMECH_API FERigidBody : public FECoreBase
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FEOBJECT_ID)
+	FECORE_BASE_CLASS(FERigidBody)
 
 public:
 	// Constructor
@@ -138,8 +139,13 @@ public:
     bool    m_bpofr;    //!< flag for all or none of rotation dofs prescribed/fixed
     
 public:
-	FERigidBodyDisplacement*	m_pDC[6];	//!< active displacement constraints
+	FERigidPrescribedBC*	m_pDC[6];	//!< active displacement constraints
 	FERigidBody*	m_prb;	//!< parent rigid body
+
+public:
+    // return the helical axis relative to the ground
+    void InstantaneousHelicalAxis(vec3d& omega, vec3d& s, double& tdot);
+    void FiniteHelicalAxis(vec3d& omega, vec3d& s, double& tdot);
 
 public:
 	DECLARE_FECORE_CLASS();

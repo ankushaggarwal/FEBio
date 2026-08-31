@@ -34,7 +34,7 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // Parameter block for pressure loads
 BEGIN_FECORE_CLASS(FEPressureLoad, FESurfaceLoad)
-	ADD_PARAMETER(m_pressure, "pressure");
+	ADD_PARAMETER(m_pressure, "pressure")->setUnits(UNIT_PRESSURE)->SetFlags(FE_PARAM_ADDLC | FE_PARAM_VOLATILE);
 	ADD_PARAMETER(m_bsymm   , "symmetric_stiffness");
 	ADD_PARAMETER(m_blinear , "linear");
 	ADD_PARAMETER(m_bshellb , "shell_bottom");
@@ -53,6 +53,9 @@ FEPressureLoad::FEPressureLoad(FEModel* pfem) : FESurfaceLoad(pfem)
 //-----------------------------------------------------------------------------
 bool FEPressureLoad::Init()
 {
+	FESurface& surf = GetSurface();
+	surf.SetShellBottom(m_bshellb);
+
 	// get the degrees of freedom
 	m_dof.Clear();
 	if (m_bshellb == false)
@@ -69,12 +72,10 @@ bool FEPressureLoad::Init()
 }
 
 //-----------------------------------------------------------------------------
-void FEPressureLoad::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
+void FEPressureLoad::LoadVector(FEGlobalVector& R)
 {
-	FESurface& surf = GetSurface();
-	surf.SetShellBottom(m_bshellb);
-
 	// evaluate the integral
+	FESurface& surf = GetSurface();
 	surf.LoadVector(R, m_dof, m_blinear, [&](FESurfaceMaterialPoint& pt, const FESurfaceDofShape& dof_a, std::vector<double>& val) {
 		
 		// evaluate pressure at this material point
@@ -96,15 +97,13 @@ void FEPressureLoad::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 }
 
 //-----------------------------------------------------------------------------
-void FEPressureLoad::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
+void FEPressureLoad::StiffnessMatrix(FELinearSystem& LS)
 {
 	// Don't calculate stiffness for a linear load
 	if (m_blinear) return;
 
-	FESurface& surf = GetSurface();
-	surf.SetShellBottom(m_bshellb);
-
 	// evaluate the integral
+	FESurface& surf = GetSurface();
 	surf.LoadStiffness(LS, m_dof, m_dof, [&](FESurfaceMaterialPoint& mp, const FESurfaceDofShape& dof_a, const FESurfaceDofShape& dof_b, matrix& kab) {
 
 		// evaluate pressure at this material point

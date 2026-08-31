@@ -52,7 +52,8 @@ struct FECORE_API LinearSolverStats
 
 class FECORE_API LinearSolver : public FECoreBase
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FELINEARSOLVER_ID)
+	FECORE_BASE_CLASS(LinearSolver)
 
 public:
 	//! constructor
@@ -116,6 +117,10 @@ public:
 	const LinearSolverStats& GetStats() const;
 
 	void ResetStats();
+
+	// Calculate (or estimate) condition number. Must be implemented by derived class.
+	// Base class returns 0;
+	virtual double ConditionNumber();
 
 protected:
 	// used by derived classes to update stats.

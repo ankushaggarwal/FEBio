@@ -34,6 +34,18 @@ SOFTWARE.*/
 void FEBiphasicContactPoint::Serialize(DumpStream& ar)
 {
     FEContactMaterialPoint::Serialize(ar);
+    ar & m_dg;
+    ar & m_Lmd;
+    ar & m_Lmt;
+    ar & m_epsn;
+    ar & m_epsp;
+    ar & m_p1;
+    ar & m_nu;
+    ar & m_s1;
+    ar & m_tr;
+    ar & m_rs;
+    ar & m_rsp;
+    ar & m_bstick;
     ar & m_Lmp & m_pg & m_mueff & m_fls;
 }
 
@@ -144,10 +156,10 @@ void FEBiphasicContactSurface::UnpackLM(FEElement& el, vector<int>& lm)
 }
 //-----------------------------------------------------------------------------
 // Evaluate the local fluid load support projected from the element to the surface Gauss points
-void FEBiphasicContactSurface::GetGPLocalFLS(int nface, double* pt)
+void FEBiphasicContactSurface::GetGPLocalFLS(int nface, double* pt, double pamb)
 {
     FESurfaceElement& el = Element(nface);
-    FEElement* e = el.m_elem[0];
+    FEElement* e = el.m_elem[0].pe;
     FESolidElement* se = dynamic_cast<FESolidElement*>(e);
     if (se) {
         mat3ds s; s.zero();
@@ -157,10 +169,12 @@ void FEBiphasicContactSurface::GetGPLocalFLS(int nface, double* pt)
             FEElasticMaterialPoint* ep = pt->ExtractData<FEElasticMaterialPoint>();
             FEBiphasicMaterialPoint* bp = pt->ExtractData<FEBiphasicMaterialPoint>();
             if (ep) s += ep->m_s;
-            if (bp) p += bp->m_pa;
+            if (bp) p += bp->m_p;
         }
         s /= se->GaussPoints();
         p /= se->GaussPoints();
+        // account for ambient pressure
+        p -= pamb;
         // evaluate FLS at integration points of that face
         for (int i=0; i<el.GaussPoints(); ++i) {
             double *H = el.H(i);
@@ -176,4 +190,3 @@ void FEBiphasicContactSurface::GetGPLocalFLS(int nface, double* pt)
     else
         for (int i=0; i<el.Nodes(); ++i) pt[i] = 0;
 }
-

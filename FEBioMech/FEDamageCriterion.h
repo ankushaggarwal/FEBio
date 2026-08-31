@@ -28,20 +28,23 @@ SOFTWARE.*/
 
 #pragma once
 #include "FECore/FEMaterial.h"
+#include "febiomech_api.h"
 
 //-----------------------------------------------------------------------------
 // Virtual base class for damage criterion
 
-class FEDamageCriterion : public FEMaterial
+class FEBIOMECH_API FEDamageCriterion : public FEMaterialProperty
 {
 public:
-	FEDamageCriterion(FEModel* pfem) : FEMaterial(pfem) {}
+	FEDamageCriterion(FEModel* pfem) : FEMaterialProperty(pfem) {}
     
 	//! damage
 	virtual double DamageCriterion(FEMaterialPoint& pt) = 0;
     
     //! criterion tangent with respect to stress
     virtual mat3ds CriterionStressTangent(FEMaterialPoint& pt) { return mat3ds(0); }
+
+    FECORE_BASE_CLASS(FEDamageCriterion);
 };
 
 //-----------------------------------------------------------------------------
@@ -180,3 +183,44 @@ public:
     //! damage
     double DamageCriterion(FEMaterialPoint& pt);
 };
+
+//-----------------------------------------------------------------------------
+// Drucker-Prager yield criterion
+
+class FEDamageCriterionDruckerPrager : public FEDamageCriterion
+{
+public:
+    FEDamageCriterionDruckerPrager(FEModel* pfem) : FEDamageCriterion(pfem) {}
+    
+    //! damage
+    double DamageCriterion(FEMaterialPoint& pt) override;
+    
+    //! criterion tangent with respect to stress
+    mat3ds CriterionStressTangent(FEMaterialPoint& pt) override;
+    
+public:
+    FEParamDouble   m_b;    //!< Drucker-Prager material parameter
+    
+    DECLARE_FECORE_CLASS();
+};
+
+//-----------------------------------------------------------------------------
+// Deshpande-Fleck yield criterion
+
+class FEDamageCriterionDeshpandeFleck : public FEDamageCriterion
+{
+public:
+    FEDamageCriterionDeshpandeFleck(FEModel* pfem) : FEDamageCriterion(pfem) {}
+    
+    //! damage
+    double DamageCriterion(FEMaterialPoint& pt) override;
+    
+    //! criterion tangent with respect to stress
+    mat3ds CriterionStressTangent(FEMaterialPoint& pt) override;
+    
+public:
+    FEParamDouble   m_beta;    //!< Deshpande-Fleck material parameter
+    
+    DECLARE_FECORE_CLASS();
+};
+

@@ -33,8 +33,6 @@ SOFTWARE.*/
 #include "FEDataMap.h"
 #include "DumpStream.h"
 
-REGISTER_SUPER_CLASS(FEMat3dsValuator, FEMAT3DSGENERATOR_ID);
-
 //=============================================================================
 // FEConstValueMat3ds
 //-----------------------------------------------------------------------------
@@ -50,7 +48,7 @@ FEConstValueMat3ds::FEConstValueMat3ds(FEModel* fem) : FEMat3dsValuator(fem)
 
 FEMat3dsValuator* FEConstValueMat3ds::copy()
 {
-	FEConstValueMat3ds* map = new FEConstValueMat3ds(GetFEModel());
+	FEConstValueMat3ds* map = fecore_alloc(FEConstValueMat3ds, GetFEModel());
 	map->m_val = m_val;
 	return map;
 }
@@ -58,6 +56,10 @@ FEMat3dsValuator* FEConstValueMat3ds::copy()
 //=============================================================================
 // FEMappedValueMat3ds
 //-----------------------------------------------------------------------------
+
+BEGIN_FECORE_CLASS(FEMappedValueMat3ds, FEMat3dsValuator)
+	ADD_PARAMETER(m_mapName, "map");
+END_FECORE_CLASS();
 
 FEMappedValueMat3ds::FEMappedValueMat3ds(FEModel* fem) : FEMat3dsValuator(fem)
 {

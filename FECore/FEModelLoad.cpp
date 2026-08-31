@@ -31,18 +31,46 @@ SOFTWARE.*/
 #include "FESolver.h"
 
 //-----------------------------------------------------------------------------
-FEModelLoad::FEModelLoad(FEModel* pfem) : FEModelComponent(pfem)
+FEModelLoad::FEModelLoad(FEModel* pfem) : FEStepComponent(pfem), m_dof(pfem)
 {
 }
 
 //-----------------------------------------------------------------------------
-void FEModelLoad::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
+const FEDofList& FEModelLoad::GetDofList() const
+{
+	return m_dof;
+}
+
+//-----------------------------------------------------------------------------
+void FEModelLoad::Serialize(DumpStream& ar)
+{
+	FEStepComponent::Serialize(ar);
+	ar & m_dof;
+}
+
+void FEModelLoad::PrepStep()
+{
+
+}
+
+Matrix_Type FEModelLoad::PreferredMatrixType()
+{
+	FEParam* p = GetParameter("symmetric_stiffness");
+	if (p && (p->type() == FE_PARAM_BOOL) && !p->value<bool>())
+	{
+		return REAL_UNSYMMETRIC;
+	}
+	return REAL_SYMMETRIC;
+}
+
+//-----------------------------------------------------------------------------
+void FEModelLoad::LoadVector(FEGlobalVector& R)
 {
 	// base class does nothing
 }
 
 //-----------------------------------------------------------------------------
-void FEModelLoad::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
+void FEModelLoad::StiffnessMatrix(FELinearSystem& LS)
 {
 	// base class does nothing.
 }

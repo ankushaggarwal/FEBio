@@ -59,6 +59,9 @@ public:
     //! Initialize linear equation system
     bool InitEquations() override;
 	bool InitEquations2() override;
+
+	//! preferred matrix type should be unsymmetric.
+	Matrix_Type PreferredMatrixType() const override { return REAL_UNSYMMETRIC; };
     
 public:
     //{ --- evaluation and update ---
@@ -70,6 +73,11 @@ public:
 
 	//! used by JFNK
 	void Update2(const vector<double>& ui) override;
+    
+    void UpdateConstraints();
+    
+    //! update DOF increments
+    void UpdateIncrements(vector<double>& Ui, vector<double>& ui, bool emap);
     //}
     
     //{ --- Solution functions ---
@@ -121,7 +129,6 @@ public:
     int		m_ndeq;				//!< number of equations related to dilatation dofs
     
 public:
-    vector<double> m_Fn;	//!< concentrated nodal force vector
     vector<double> m_Fr;	//!< nodal reaction forces
     vector<double> m_vi;	//!< velocity increment vector
     vector<double> m_Vi;	//!< Total velocity vector for iteration

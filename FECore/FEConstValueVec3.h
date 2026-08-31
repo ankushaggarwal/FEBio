@@ -47,6 +47,8 @@ public:
 
 	vec3d& value() { return m_val; }
 
+	void setConstValue(const vec3d& v) { m_val = v; }
+
 private:
 	vec3d	m_val;
 
@@ -66,6 +68,10 @@ public:
 	bool create(const std::string& sx, const std::string& sy, const std::string& sz);
 
 	FEVec3dValuator* copy() override;
+
+	bool UpdateParams() override;
+
+	void Serialize(DumpStream& ar) override;
 
 private:
 	std::string			m_expr;
@@ -89,8 +95,15 @@ public:
 
 	void Serialize(DumpStream& ar) override;
 
+	bool Init() override;
+
+private:
+	std::string		m_mapName;
+
 private:
 	FEDataMap*		m_val;
+
+	DECLARE_FECORE_CLASS();
 };
 
 
@@ -165,6 +178,21 @@ public:
 protected:
 	FEParamDouble	m_theta;	// in-plane (x,y) angle from x-axis
 	FEParamDouble	m_phi;		// angle from z-axis
+
+	DECLARE_FECORE_CLASS();
+};
+
+//-----------------------------------------------------------------------------
+// This class is mostly to support some older formats that used the "user" fiber
+// generator option. It actually doesn't generate any vectors and should not be used. 
+class FECORE_API FEUserVectorGenerator : public FEVec3dValuator
+{
+public:
+	FEUserVectorGenerator(FEModel* fem);
+
+	vec3d operator () (const FEMaterialPoint& mp) override;
+
+	FEVec3dValuator* copy() override;
 
 	DECLARE_FECORE_CLASS();
 };

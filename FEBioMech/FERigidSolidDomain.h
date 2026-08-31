@@ -44,6 +44,13 @@ public:
 	//! reset data
 	void Reset() override;
 
+	//! serialization
+	void Serialize(DumpStream& ar) override;
+
+	void PreSolveUpdate(const FETimeInfo& timeInfo) override;
+
+	void BuildMatrixProfile(FEGlobalMatrix& M) override;
+
 public:
 
 	//! calculates the global stiffness matrix for this domain
@@ -52,6 +59,22 @@ public:
 	//! calculates the residual (nothing to do)
 	void InternalForces(FEGlobalVector& R) override;
 
+	//! calculates mass matrix (nothing to do)
+	void MassMatrix(FELinearSystem& LS, double scale) override;
+
+	//! calculates the inertial forces (nothing to do)
+	void InertialForces(FEGlobalVector& R, std::vector<double>& F) override;
+
 	// update domain data
 	void Update(const FETimeInfo& tp) override;
+
+	void BodyForce(FEGlobalVector& R, FEBodyForce& BF) override;
+
+public:
+	// calculate contribution of MOI for this domain
+	mat3d CalculateMOI();
+
+	double CalculateMass();
+
+	vec3d CalculateCOM();
 };

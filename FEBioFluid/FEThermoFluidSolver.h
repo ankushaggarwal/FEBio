@@ -44,6 +44,11 @@ class FELinearSystem;
 class FEBIOFLUID_API FEThermoFluidSolver : public FENewtonSolver
 {
 public:
+    enum SOLVE_STRATEGY {
+        SOLVE_COUPLED,          // monolithic solution approach
+        SOLVE_SEQUENTIAL        // first solve velocity+dilatation, then temperature
+    };
+    
     //! constructor
     FEThermoFluidSolver(FEModel* pfem);
     
@@ -59,7 +64,10 @@ public:
     //! Initialize linear equation system
     bool InitEquations() override;
     bool InitEquations2() override;
-    
+
+	//! preferred matrix type should be unsymmetric.
+	Matrix_Type PreferredMatrixType() const override { return REAL_UNSYMMETRIC; };
+
 public:
     //{ --- evaluation and update ---
     //! Perform an update
@@ -70,6 +78,11 @@ public:
 
     //! used by JFNK
     void Update2(const vector<double>& ui) override;
+    
+    void UpdateConstraints();
+    
+    //! update DOF increments
+    void UpdateIncrements(vector<double>& Ui, vector<double>& ui, bool emap);
     //}
     
     //{ --- Solution functions ---
@@ -116,6 +129,10 @@ public:
     double  m_Ftol;         //!< dilatation tolerance
     double  m_Ttol;         //!< temperature tolerance
     double  m_minJf;        //!< minimum allowable compression ratio
+    double  m_minT;         //!< minimum allowable absolute temperature
+    double  m_Tmin;     //!< threshold for detecting sudden drop in concentration
+    double  m_Tmax;     //!< threshold for detecting sudden increase in concentration
+    int     m_Tnum;     //!< minimum number of points at which C drops suddenly
 
 public:
     // equation numbers
@@ -124,7 +141,6 @@ public:
     int        m_nteq;                //!< number of equations related to temperature dofs
 
 public:
-    vector<double> m_Fn;    //!< concentrated nodal force vector
     vector<double> m_Fr;    //!< nodal reaction forces
     vector<double> m_vi;    //!< velocity increment vector
     vector<double> m_Vi;    //!< Total velocity vector for iteration
@@ -148,6 +164,11 @@ protected:
     int         m_dofAEF;
     int         m_dofAT;
 
+    int                m_solve_strategy;
+    
+private:
+    bool            m_sudden_T_change;
+    
     // declare the parameter list
     DECLARE_FECORE_CLASS();
 };

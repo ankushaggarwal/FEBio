@@ -35,6 +35,7 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // Define sliding interface parameters
 BEGIN_FECORE_CLASS(FETiedInterface, FEContactInterface)
+	ADD_PARAMETER(m_laugon  , "laugon"          )->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0LAGMULT\0");
 	ADD_PARAMETER(m_atol    , "tolerance"       );
 	ADD_PARAMETER(m_eps     , "penalty"         );
 	ADD_PARAMETER(m_naugmin , "minaug"          );
@@ -58,7 +59,7 @@ FETiedInterface::FETiedInterface(FEModel* pfem) : FEContactInterface(pfem), ss(p
 	ms.SetSibling(&ss);
 
 	// initial parameter values
-	m_laugon = 0;
+	m_laugon = FECore::PENALTY_METHOD;
 	m_atol = 0.01;
 	m_eps = 1.0;
 	m_stol = 0.0001;
@@ -94,18 +95,17 @@ bool FETiedInterface::Init()
 //! build the matrix profile for use in the stiffness matrix
 void FETiedInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 {
-	FEModel& fem = *GetFEModel();
-	FEMesh& mesh = fem.GetMesh();
+	FEMesh& mesh = GetMesh();
 
 	// get the DOFS
-	const int dof_X = fem.GetDOFIndex("x");
-	const int dof_Y = fem.GetDOFIndex("y");
-	const int dof_Z = fem.GetDOFIndex("z");
-	const int dof_RU = fem.GetDOFIndex("Ru");
-	const int dof_RV = fem.GetDOFIndex("Rv");
-	const int dof_RW = fem.GetDOFIndex("Rw");
+	const int dof_X = GetDOFIndex("x");
+	const int dof_Y = GetDOFIndex("y");
+	const int dof_Z = GetDOFIndex("z");
+	const int dof_RU = GetDOFIndex("Ru");
+	const int dof_RV = GetDOFIndex("Rv");
+	const int dof_RW = GetDOFIndex("Rw");
 
-	if (m_laugon != 2)
+	if (m_laugon != FECore::LAGMULT_METHOD)
 	{
 		const int LMSIZE = 6 * (FEElement::MAX_NODES + 1);
 		vector<int> lm(LMSIZE);
@@ -116,7 +116,7 @@ void FETiedInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 			if (pe != 0)
 			{
 				FESurfaceElement& me = *pe;
-				int* en = &me.m_node[0];
+				int* en = &me.m_lnode[0];
 
 				int n = me.Nodes();
 				lm.assign(LMSIZE, -1);
@@ -130,7 +130,7 @@ void FETiedInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 
 				for (int k = 0; k < n; ++k)
 				{
-					vector<int>& id = mesh.Node(en[k]).m_ID;
+					vector<int>& id = ms.Node(en[k]).m_ID;
 					lm[6 * (k + 1)] = id[dof_X];
 					lm[6 * (k + 1) + 1] = id[dof_Y];
 					lm[6 * (k + 1) + 2] = id[dof_Z];
@@ -152,7 +152,7 @@ void FETiedInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 			if (pe != 0)
 			{
 				FESurfaceElement& me = *pe;
-				int* en = &me.m_node[0];
+				int* en = &me.m_lnode[0];
 
 				int n = me.Nodes();
 				lm.assign(3*(n+2), -1);
@@ -163,7 +163,7 @@ void FETiedInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 
 				for (int k = 0; k < n; ++k)
 				{
-					vector<int>& id = mesh.Node(en[k]).m_ID;
+					vector<int>& id = ms.Node(en[k]).m_ID;
 					lm[3 * (k + 1)    ] = id[dof_X];
 					lm[3 * (k + 1) + 1] = id[dof_Y];
 					lm[3 * (k + 1) + 2] = id[dof_Z];
@@ -195,7 +195,7 @@ void FETiedInterface::Activate()
 int FETiedInterface::InitEquations(int neq)
 {
 	// make sure we want to use Lagrange Multiplier method
-	if (m_laugon != 2) return 0;
+	if (m_laugon != FECore::LAGMULT_METHOD) return 0;
 
 	// allocate three equations per primary node
 	int NN = ss.Nodes();
@@ -232,7 +232,7 @@ void FETiedInterface::Update()
 			// get the nodal coordinates
 			int ne = pme->Nodes();
 			vec3d y[FEElement::MAX_NODES];
-			for (int l=0; l<ne; ++l) y[l] = mesh.Node( pme->m_node[l] ).m_rt;
+			for (int l=0; l<ne; ++l) y[l] = ms.Node( pme->m_lnode[l] ).m_rt;
 
 			// calculate the primary node projection
 			vec3d q = pme->eval(y, r, s);
@@ -261,6 +261,9 @@ void FETiedInterface::ProjectSurface(FETiedContactSurface& ss, FETiedContactSurf
 	cpp.SetTolerance(m_stol);
 	cpp.HandleSpecialCases(m_bspecial);
 	cpp.Init();
+
+	// let's count contact pairs
+	int contacts = 0;
 
 	// loop over all primary nodes
 	for (int i=0; i<ss.Nodes(); ++i)
@@ -302,8 +305,17 @@ void FETiedInterface::ProjectSurface(FETiedContactSurface& ss, FETiedContactSurf
 
 				// calculate force
 				ss.m_data[i].m_Tc = ss.m_data[i].m_Lm + ss.m_data[i].m_vgap*m_eps;
+
+				contacts++;
 			}
 		}
+	}
+
+	// if we found no contact pairs, let's report this since this is probably not the user's intention
+	if (contacts == 0)
+	{
+		std::string name = GetName();
+		feLogWarning("No contact pairs found for tied interface \"%s\".\nThis contact interface may not have any effect.", name.c_str());
 	}
 }
 
@@ -359,7 +371,7 @@ void FETiedInterface::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 				vec3d tc = ss.m_data[m].m_Lm;
 
 				// add penalty contribution for penalty and aug lag method
-				if (m_laugon != 2) tc += ss.m_data[m].m_vgap*m_eps;
+				if (m_laugon != FECore::LAGMULT_METHOD) tc += ss.m_data[m].m_vgap*m_eps;
 
 				// get the secondary element
 				FESurfaceElement& mel = *ss.m_data[m].m_pme;
@@ -375,7 +387,7 @@ void FETiedInterface::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 				mel.shape_fnc(N, r, s);
 
 				// allocate "element" force vector
-				if (m_laugon != 2) fe.resize(3 * (nmeln + 1));
+				if (m_laugon != FECore::LAGMULT_METHOD) fe.resize(3 * (nmeln + 1));
 				else fe.resize(3 * (nmeln + 2));
 
 				// calculate contribution to force vector from nodes
@@ -390,7 +402,7 @@ void FETiedInterface::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 				}
 
 				// setup lm vector
-				if (m_laugon != 2) lm.resize(3 * (nmeln + 1));
+				if (m_laugon != FECore::LAGMULT_METHOD) lm.resize(3 * (nmeln + 1));
 				else lm.resize(3 * (nmeln + 2));
 
 				// fill the lm array
@@ -404,14 +416,14 @@ void FETiedInterface::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 					lm[3 * (l + 1) + 2] = mLM[l * 3 + 2];
 				}
 
-				if (m_laugon != 2) en.resize(nmeln + 1);
+				if (m_laugon != FECore::LAGMULT_METHOD) en.resize(nmeln + 1);
 				else en.resize(nmeln + 2);
 
 				// fill the en array
 				en[0] = sel.m_node[n];
 				for (int l = 0; l < nmeln; ++l) en[l + 1] = mel.m_node[l];
 
-				if (m_laugon == 2)
+				if (m_laugon == FECore::LAGMULT_METHOD)
 				{
 					// get the gap function
 					vec3d g = ss.m_data[m].m_vgap;
@@ -485,7 +497,7 @@ void FETiedInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 				// get the secondary shape function values at this primary node
 				me.shape_fnc(H, r, s);
 
-				if (m_laugon != 2)
+				if (m_laugon != FECore::LAGMULT_METHOD)
 				{
 					// number of degrees of freedom
 					int ndof = 3 * (1 + nmeln);
@@ -539,7 +551,7 @@ void FETiedInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 				}
 
 				// create lm array
-				if (m_laugon != 2) lm.resize(3 * (1 + nmeln));
+				if (m_laugon != FECore::LAGMULT_METHOD) lm.resize(3 * (1 + nmeln));
 				else lm.resize(3 * (2 + nmeln));
 
 				lm[0] = sLM[n * 3];
@@ -552,7 +564,7 @@ void FETiedInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 					lm[3 * (k + 1) + 2] = mLM[k * 3 + 2];
 				}
 
-				if (m_laugon == 2)
+				if (m_laugon == FECore::LAGMULT_METHOD)
 				{
 					lm[3 * (nmeln + 1)] = m_LM[3 * m];
 					lm[3 * (nmeln + 1) + 1] = m_LM[3 * m + 1];
@@ -560,13 +572,13 @@ void FETiedInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 				}
 
 				// create the en array
-				if (m_laugon != 2) en.resize(nmeln + 1);
+				if (m_laugon != FECore::LAGMULT_METHOD) en.resize(nmeln + 1);
 				else en.resize(nmeln + 2);
 
 				en[0] = se.m_node[n];
 				for (int k = 0; k < nmeln; ++k) en[k + 1] = me.m_node[k];
 
-				if (m_laugon == 2) en[nmeln + 1] = -1;
+				if (m_laugon == FECore::LAGMULT_METHOD) en[nmeln + 1] = -1;
 
 				// assemble stiffness matrix
 				ke.SetNodes(en);
@@ -582,7 +594,7 @@ void FETiedInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 bool FETiedInterface::Augment(int naug, const FETimeInfo& tp)
 {
 	// make sure we need to augment
-	if (m_laugon != 1) return true;
+	if (m_laugon != FECore::AUGLAG_METHOD) return true;
 
 	int i;
 
@@ -679,17 +691,39 @@ void FETiedInterface::Serialize(DumpStream &ar)
 	}
 }
 
-//-----------------------------------------------------------------------------
-//! Update Lagrange multipliers
-void FETiedInterface::Update(vector<double>& ui)
+void FETiedInterface::PrepStep()
 {
-	if (m_laugon == 2)
+	if (m_laugon == FECore::LAGMULT_METHOD)
 	{
 		for (int i = 0; i < ss.Nodes(); ++i)
 		{
-			ss.m_data[i].m_Lm.x += ui[m_LM[3 * i    ]];
-			ss.m_data[i].m_Lm.y += ui[m_LM[3 * i + 1]];
-			ss.m_data[i].m_Lm.z += ui[m_LM[3 * i + 2]];
+			ss.m_data[i].m_Lp = ss.m_data[i].m_Lm;
 		}
+	}
+}
+
+//! Update Lagrange multipliers
+void FETiedInterface::Update(const std::vector<double>& Ui, const std::vector<double>& ui)
+{
+	if (m_laugon == FECore::LAGMULT_METHOD)
+	{
+		for (int i = 0; i < ss.Nodes(); ++i)
+		{
+			ss.m_data[i].m_Lm.x = ss.m_data[i].m_Lp.x + Ui[m_LM[3 * i    ]] + ui[m_LM[3 * i    ]];
+			ss.m_data[i].m_Lm.y = ss.m_data[i].m_Lp.y + Ui[m_LM[3 * i + 1]] + ui[m_LM[3 * i + 1]];
+			ss.m_data[i].m_Lm.z = ss.m_data[i].m_Lp.z + Ui[m_LM[3 * i + 2]] + ui[m_LM[3 * i + 2]];
+		}
+	}
+}
+
+void FETiedInterface::UpdateIncrements(std::vector<double>& Ui, const std::vector<double>& ui)
+{
+	if (m_laugon != FECore::LAGMULT_METHOD) return;
+
+	for (int i = 0; i < ss.Nodes(); ++i)
+	{
+		Ui[m_LM[3 * i    ]] += ui[m_LM[3 * i    ]];
+		Ui[m_LM[3 * i + 1]] += ui[m_LM[3 * i + 1]];
+		Ui[m_LM[3 * i + 2]] += ui[m_LM[3 * i + 2]];
 	}
 }

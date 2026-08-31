@@ -33,9 +33,9 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEPowellEyringFluid, FEViscousFluid)
-	ADD_PARAMETER(m_mu0, FE_RANGE_GREATER_OR_EQUAL(0.0), "mu0");
-	ADD_PARAMETER(m_mui, FE_RANGE_GREATER_OR_EQUAL(0.0), "mui");
-	ADD_PARAMETER(m_lam, FE_RANGE_GREATER_OR_EQUAL(0.0), "lambda");
+	ADD_PARAMETER(m_mu0, FE_RANGE_GREATER_OR_EQUAL(0.0), "mu0")->setUnits("P.t")->setLongName("zero shear rate viscosity");
+	ADD_PARAMETER(m_mui, FE_RANGE_GREATER_OR_EQUAL(0.0), "mui")->setUnits("P.t")->setLongName("infinite shear rate viscosity");
+	ADD_PARAMETER(m_lam, FE_RANGE_GREATER_OR_EQUAL(0.0), "lambda")->setUnits(UNIT_TIME)->setLongName("relaxation time");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -94,6 +94,22 @@ double FEPowellEyringFluid::ShearViscosity(FEMaterialPoint& pt)
     double lamg = m_lam*gdot;
     double mu = (lamg < 1e-3) ? m_mu0 : m_mui + (m_mu0 - m_mui)*asinh(lamg)/lamg;
     return mu;
+}
+
+//! derivative of shear viscosity w.r.t. strain rate
+double FEPowellEyringFluid::Tangent_ShearViscosity_StrainRate(FEMaterialPoint& mp)
+{
+	FEFluidMaterialPoint& vt = *mp.ExtractData<FEFluidMaterialPoint>();
+	mat3ds D = vt.RateOfDeformation();
+	double gdot = sqrt(2 * (D.sqr()).tr());
+	double lamg = m_lam * gdot;
+
+	double dmu = (lamg < 1e-3) ? -2 * (m_mu0 - m_mui) * m_lam * m_lam / 3. :
+		(2 * (m_mu0 - m_mui) * (gdot / sqrt(1 + pow(lamg, 2)) - asinh(lamg) / m_lam)) / pow(gdot, 3);
+
+	double dmu_dgdot = 0.5 * gdot * dmu;
+
+   return dmu_dgdot;
 }
 
 //-----------------------------------------------------------------------------

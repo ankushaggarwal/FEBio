@@ -34,7 +34,8 @@ class mat2d
 {
 public:
 	// constructors
-	mat2d(){}
+	mat2d() { d[0][0] = d[0][1] = d[1][0] = d[1][1] = 0.0; }
+	mat2d(double a) { d[0][0] = d[1][1] = a; d[1][0] = d[0][1] = 0; }
 	mat2d(double a00, double a01, double a10, double a11)
 	{
 		d[0][0] = a00; d[0][1] = a01;
@@ -45,6 +46,11 @@ public:
 	double& operator () (int i, int j) { return d[i][j]; }
 	double operator () (int i, int j) const { return d[i][j]; }
 	double* operator [] (int i) { return d[i]; }
+	const double* operator [] (int i) const { return d[i]; }
+
+	// comparison operators
+	bool operator == (const mat2d& m) const { return (d[0][0] == m.d[0][0]) && (d[0][1] == m.d[0][1]) && (d[1][0] == m.d[1][0]) && (d[1][1] == m.d[1][1]); }
+	bool operator != (const mat2d& m) const { return !(*this == m); }
 
 public: // arithmetic operations
 	mat2d operator + (const mat2d& m) { return mat2d(d[0][0]+m.d[0][0], d[0][1]+m.d[0][1], d[1][0]+m.d[1][0], d[1][1]+m.d[1][1]); }
@@ -87,6 +93,16 @@ public:	// matrix operations
 		d[0][0] = d[1][1] = 1.0;
 		d[0][1] = d[1][0] = 0.0;
 	}
+
+	double trace() const 
+	{
+		return d[0][0] + d[1][1];
+	}
+
+	double det() const
+	{
+		return d[0][0]*d[1][1] - d[0][1]*d[1][0];
+	}
 	
 protected:
 	double	d[2][2];
@@ -96,4 +112,4 @@ protected:
 inline vec2d operator * (mat2d& m, vec2d& a) { return vec2d(m[0][0]*a[0]+m[0][1]*a[1], m[1][0]*a[0]+m[1][1]*a[1]); }
 
 // dyadic product
-inline mat2d dyad(vec2d& a, vec2d& b) { return mat2d(a.r[0]*b.r[0], a.r[0]*b.r[1], a.r[1]*b.r[0], a.r[1]*b.r[1]); }
+inline mat2d dyad(vec2d& a, vec2d& b) { return mat2d(a.x*b.x, a.x*b.y, a.y*b.x, a.y*b.y); }

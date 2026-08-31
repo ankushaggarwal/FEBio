@@ -28,17 +28,17 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FESurfaceToSurfaceMap.h"
-#include "FEModel.h"
 #include "FEMesh.h"
 #include "FESurface.h"
+#include <FECore/FEDomainMap.h>
 
-BEGIN_FECORE_CLASS(FESurfaceToSurfaceMap, FEDataGenerator)
+BEGIN_FECORE_CLASS(FESurfaceToSurfaceMap, FEElemDataGenerator)
 	ADD_PROPERTY(m_func, "function");
 	ADD_PROPERTY(m_surf1, "bottom_surface", FEProperty::Reference);
-	ADD_PROPERTY(m_surf2, "top_surface"   , FEProperty::Reference);
+	ADD_PROPERTY(m_surf2, "top_surface", FEProperty::Reference);
 END_FECORE_CLASS();
 
-FESurfaceToSurfaceMap::FESurfaceToSurfaceMap(FEModel* fem) : FEDataGenerator(fem)
+FESurfaceToSurfaceMap::FESurfaceToSurfaceMap(FEModel* fem) : FEElemDataGenerator(fem)
 {
 	m_ccp1 = 0;
 	m_ccp2 = 0;
@@ -58,11 +58,10 @@ FESurfaceToSurfaceMap::~FESurfaceToSurfaceMap()
 
 bool FESurfaceToSurfaceMap::Init()
 {
-	FEModel* fem = GetFEModel();
-	if (fem == 0) return false;
+	FEMesh& mesh = GetMesh();
 	if (m_func == 0) return false;
-	if ((m_surf1 == 0) || (m_surf2 == 0)) return false;
-
+	if ((m_surf1 == nullptr) || (m_surf2 == nullptr)) return false;
+	
 	// we need to invert the second surface, otherwise the normal projections won't work
 	if (m_binverted == false)
 	{
@@ -89,10 +88,10 @@ bool FESurfaceToSurfaceMap::Init()
     
     m_func->Init();
 
-	return FEDataGenerator::Init();
+	return FEMeshDataGenerator::Init();
 }
 
-void FESurfaceToSurfaceMap::value(const vec3d& x, double& data)
+double FESurfaceToSurfaceMap::value(const vec3d& x)
 {
 	vec3d r(x);
 
@@ -103,8 +102,7 @@ void FESurfaceToSurfaceMap::value(const vec3d& x, double& data)
 	if (pe1 == nullptr)
 	{
 		assert(false);
-		data = 0;
-		return;
+		return 0.0;
 	}
 
 	// project x onto surface 2
@@ -112,8 +110,7 @@ void FESurfaceToSurfaceMap::value(const vec3d& x, double& data)
 	if (pe2 == nullptr)
 	{
 		assert(false);
-		data = 0;
-		return;
+		return 0.0;
 	}
 
 	double L1 = (x - q1).norm();
@@ -126,5 +123,24 @@ void FESurfaceToSurfaceMap::value(const vec3d& x, double& data)
 	double w = L1 / D;
 
 	// evaluate the function
-	data = m_func->value(w);
+	return m_func->value(w);
+}
+
+FEDataMap* FESurfaceToSurfaceMap::Generate()
+{
+	FEElementSet* elset = GetElementSet();
+	if (elset == nullptr) return nullptr;
+
+	FEDomainMap* map = new FEDomainMap(FEDataType::FE_DOUBLE, Storage_Fmt::FMT_NODE);
+	map->Create(elset);
+
+	FENodeList nodeList = elset->GetNodeList();
+	for (int i = 0; i < nodeList.Size(); ++i)
+	{
+		FENode* pn = nodeList.Node(i);
+		double v = value(pn->m_r0);
+		map->setValue(i, v);
+	}
+
+	return map;
 }

@@ -77,6 +77,7 @@ void FESlidingSurface::FESlidingPoint::Init()
 //-----------------------------------------------------------------------------
 // Define sliding interface parameters
 BEGIN_FECORE_CLASS(FESlidingInterface, FEContactInterface)
+	ADD_PARAMETER(m_laugon       , "laugon"       )->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0");
 	ADD_PARAMETER(m_atol         , "tolerance"    );
 	ADD_PARAMETER(m_eps          , "penalty"      );
 	ADD_PARAMETER(m_bautopen     , "auto_penalty" );
@@ -1020,13 +1021,13 @@ void FESlidingInterface::ContactNodalForce(int m, FESlidingSurface& ss, FESurfac
 		double TMT = Tt[0]*(Mki[0][0]*Tt[0]+Mki[0][1]*Tt[1])+Tt[1]*(Mki[1][0]*Tt[0]+Mki[1][1]*Tt[1]);
 		assert(TMT >= 0);
 
-		double phi = sqrt(TMT) - m_mu*Ln;
+		double phi = sqrt(TMT) - m_mu* tn;
 
 		// b. return map
 		if (phi > 0)
 		{
-			Tt[0] = m_mu*Ln*Tt[0]/sqrt(TMT);
-			Tt[1] = m_mu*Ln*Tt[1]/sqrt(TMT);
+			Tt[0] = m_mu* tn *Tt[0]/sqrt(TMT);
+			Tt[1] = m_mu* tn *Tt[1]/sqrt(TMT);
 		}
 
 		// tangential force vector
@@ -1514,7 +1515,7 @@ void FESlidingInterface::ContactNodalStiffness(int m, FESlidingSurface& ss, FESu
 bool FESlidingInterface::Augment(int naug, const FETimeInfo& tp)
 {
 	// make sure we need to augment
-	if (m_laugon != 1) return true;
+	if (m_laugon != FECore::AUGLAG_METHOD) return true;
 
 	double Ln;
 	double Lt[2];
@@ -1671,7 +1672,8 @@ bool FESlidingInterface::Augment(int naug, const FETimeInfo& tp)
 	// calculate and print convergence norms
 	double lnorm = 0, gnorm = 0;
 	if (normL1 != 0) lnorm = fabs(normL1 - normL0)/normL1; else lnorm = fabs(normL1 - normL0);
-	if (normg1 != 0) gnorm = fabs(normg1 - m_normg0)/normg1; else gnorm = fabs(normg1 - m_normg0);
+//	if (normg1 != 0) gnorm = fabs(normg1 - m_normg0)/normg1; else gnorm = fabs(normg1 - m_normg0);
+	gnorm = fabs(normg1 - m_normg0);
 
 	feLog(" sliding interface # %d\n", GetID());
 	feLog("                        CURRENT        REQUIRED\n");

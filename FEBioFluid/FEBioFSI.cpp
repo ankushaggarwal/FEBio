@@ -39,6 +39,10 @@ SOFTWARE.*/
 #include "FEBiphasicFSITraction.h"
 #include "FEBiphasicFSI.h"
 #include "FEBiphasicFSIDomain3D.h"
+#include "FEFluidModule.h"
+#include "FEFluidFSIAnalysis.h"
+#include "FEFluidSupplyStarling.h"
+#include <FECore/FETimeStepController.h>
 
 //-----------------------------------------------------------------------------
 const char* FEBioFSI::GetVariableName(FEBioFSI::FSI_VARIABLE var)
@@ -47,7 +51,7 @@ const char* FEBioFSI::GetVariableName(FEBioFSI::FSI_VARIABLE var)
 	{
 	case DISPLACEMENT                : return "displacement"               ; break;
 	case VELOCITY                    : return "velocity"                   ; break;
-	case SHELL_ROTATION              : return "shell rotation"             ; break;
+	case ROTATION                    : return "rotation"                   ; break;
 	case SHELL_DISPLACEMENT          : return "shell displacement"         ; break;
 	case SHELL_VELOCITY              : return "shell velocity"             ; break;
 	case SHELL_ACCELERATION          : return "shell acceleration"         ; break;
@@ -56,8 +60,8 @@ const char* FEBioFSI::GetVariableName(FEBioFSI::FSI_VARIABLE var)
 	case RELATIVE_FLUID_ACCELERATION : return "relative fluid acceleration"; break;
 	case FLUID_VELOCITY              : return "fluid velocity"             ; break;
 	case FLUID_ACCELERATION          : return "fluid acceleration"         ; break;
-	case FLUID_DILATATION            : return "fluid dilation"             ; break;
-	case FLUID_DILATATION_TDERIV     : return "fluid dilation tderiv"      ; break;
+	case FLUID_DILATATION            : return "fluid dilatation"           ; break;
+	case FLUID_DILATATION_TDERIV     : return "fluid dilatation tderiv"    ; break;
 	}
 	assert(false);
 	return nullptr;
@@ -71,10 +75,20 @@ void FEBioFSI::InitModule()
 	febio.RegisterDomain(new FEFluidFSIDomainFactory);
 
 	// define the fsi module
-	febio.CreateModule("fluid-FSI");
-	febio.SetModuleDependency("fluid");
-	febio.SetModuleDependency("biphasic");	// also pulls in "solid"
+	febio.CreateModule(new FEFluidFSIModule, "fluid-FSI",
+		"{"
+		"   \"title\" : \"Fluid-Structure Interaction\","
+		"   \"info\"  : \"FSI analysis where a fluid interacts with a rigid, solid or biphasic structure.\""
+		"}");
 
+	febio.AddModuleDependency("fluid");
+	febio.AddModuleDependency("biphasic");	// also pulls in "solid"
+
+	//-----------------------------------------------------------------------------
+	// analysis classes (default type must match module name!)
+	REGISTER_FECORE_CLASS(FEFluidFSIAnalysis, "fluid-FSI");
+
+	//-----------------------------------------------------------------------------
 	REGISTER_FECORE_CLASS(FEFluidFSISolver, "fluid-FSI");
 
 	REGISTER_FECORE_CLASS(FEFluidFSI, "fluid-FSI");
@@ -93,5 +107,7 @@ void FEBioFSI::InitModule()
     
     REGISTER_FECORE_CLASS(FEBiphasicFSIDomain3D, "biphasic-FSI-3D");
 
-    febio.SetActiveModule(0);
+    REGISTER_FECORE_CLASS(FEFluidSupplyStarling, "Starling");
+
+	febio.SetActiveModule(0);
 }

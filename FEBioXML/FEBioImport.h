@@ -28,18 +28,16 @@ SOFTWARE.*/
 
 #pragma once
 #include "FileImport.h"
-#include "XMLReader.h"
-#include "FECore/FEAnalysis.h"
-#include "FECore/FESolver.h"
-#include "FECore/DataStore.h"
+#include <FECore/XMLReader.h>
+#include <FECore/FEAnalysis.h>
+#include <FECore/FESolver.h>
+#include <FECore/DataStore.h>
 #include <FECore/FEMesh.h>
 #include <FECore/FESurfaceMap.h>
 #include <FECore/tens3d.h>
 #include <string>
-using namespace std;
 
 class FENodeSet;
-
 class FEBioImport;
 
 //-----------------------------------------------------------------------------
@@ -139,6 +137,36 @@ public:
 		MeshDataError();
 	};
 
+	// repeated node set
+	class RepeatedNodeSet : public FEFileException
+	{
+	public: RepeatedNodeSet(const std::string& name);
+	};
+
+	// repeated surface
+	class RepeatedSurface : public FEFileException
+	{
+	public: RepeatedSurface(const std::string& name);
+	};
+
+	// repeated edge set
+	class RepeatedEdgeSet : public FEFileException
+	{
+	public: RepeatedEdgeSet(const std::string& name);
+	};
+
+	// repeated element set
+	class RepeatedElementSet : public FEFileException
+	{
+	public: RepeatedElementSet(const std::string& name);
+	};
+
+	// repeated part list
+	class RepeatedPartList : public FEFileException
+	{
+	public: RepeatedPartList(const std::string& name);
+	};
+
 public:
 	//! constructor
 	FEBioImport();
@@ -175,5 +203,5 @@ public:
 	char	m_szplt[512];
 
 public:
-	vector<DataRecord*>		m_data;
+	std::vector<DataRecord*>		m_data;
 };

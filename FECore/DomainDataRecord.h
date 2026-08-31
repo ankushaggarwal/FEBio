@@ -32,12 +32,13 @@ class FEDomain;
 
 //-----------------------------------------------------------------------------
 //! Base class for domain log data
-class FECORE_API FELogDomainData : public FECoreBase
+class FECORE_API FELogDomainData : public FELogData
 {
-    FECORE_SUPER_CLASS
+    FECORE_SUPER_CLASS(FELOGDOMAINDATA_ID)
+    FECORE_BASE_CLASS(FELogDomainData)
 
 public:
-    FELogDomainData(FEModel* fem) : FECoreBase(fem) {}
+    FELogDomainData(FEModel* fem) : FELogData(fem) {}
     virtual ~FELogDomainData() {}
     virtual double value(FEDomain& rc) = 0;
 
@@ -48,12 +49,12 @@ public:
 class FECORE_API FEDomainDataRecord : public DataRecord
 {
 public:
-    FEDomainDataRecord(FEModel* pfem, const char* szfile);
-    double Evaluate(int item, int ndata);
-    void SetData(const char* sz);
-    void SelectAllItems();
+    FEDomainDataRecord(FEModel* pfem);
+    double Evaluate(int item, int ndata) override;
+    void SetData(const char* sz) override;
+    void SelectAllItems() override;
     void SetDomain(int domainIndex);
-    int Size() const;
+    int Size() const override;
 
 private:
     vector<FELogDomainData*>	m_Data;
@@ -67,7 +68,7 @@ public:
     ~FELogAvgDomainData();
     double value(FEDomain& rc) override;
 
-    bool SetParameters(std::vector<std::string>& params);
+    bool SetParameters(std::vector<std::string>& params) override;
 
 private:
     FELogElemData* m_elemData;
@@ -81,9 +82,23 @@ public:
     ~FELogPctDomainData();
     double value(FEDomain& rc) override;
 
-    bool SetParameters(std::vector<std::string>& params);
+    bool SetParameters(std::vector<std::string>& params) override;
 
 private:
     double          m_pct;
     FELogElemData* m_elemData;
+};
+
+//-----------------------------------------------------------------------------
+class FECORE_API FELogIntegralDomainData : public FELogDomainData
+{
+public:
+	FELogIntegralDomainData(FEModel* pfem);
+	~FELogIntegralDomainData();
+	double value(FEDomain& rc) override;
+
+	bool SetParameters(std::vector<std::string>& params) override;
+
+private:
+	FELogElemData* m_elemData;
 };

@@ -33,30 +33,17 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 FEReactiveViscoelasticMaterialPoint::FEReactiveViscoelasticMaterialPoint() : FEMaterialPointArray(new FEElasticMaterialPoint)
 {
+
 }
 
 //-----------------------------------------------------------------------------
-FEMaterialPoint* FEReactiveViscoelasticMaterialPoint::Copy()
+FEMaterialPointData* FEReactiveViscoelasticMaterialPoint::Copy()
 {
     FEReactiveViscoelasticMaterialPoint* pt = new FEReactiveViscoelasticMaterialPoint;
     pt->m_mp = m_mp;
     if (m_pNext) pt->m_pNext = m_pNext->Copy();
     return pt;
 }
-
-//-----------------------------------------------------------------------------
-void FEReactiveViscoelasticMaterialPoint::Init()
-{
-    // don't forget to initialize the base class
-    FEMaterialPointArray::Init();
-}
-
-//-----------------------------------------------------------------------------
-void FEReactiveViscoelasticMaterialPoint::Serialize(DumpStream& ar)
-{
-    FEMaterialPointArray::Serialize(ar);
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -66,7 +53,7 @@ void FEReactiveViscoelasticMaterialPoint::Serialize(DumpStream& ar)
 
 //-----------------------------------------------------------------------------
 //! Create a shallow copy of the material point data
-FEMaterialPoint* FEReactiveVEMaterialPoint::Copy()
+FEMaterialPointData* FEReactiveVEMaterialPoint::Copy()
 {
     FEReactiveVEMaterialPoint* pt = new FEReactiveVEMaterialPoint(*this);
     if (m_pNext) pt->m_pNext = m_pNext->Copy();
@@ -84,31 +71,32 @@ void FEReactiveVEMaterialPoint::Init()
 	m_f.clear();
     
     m_Et = 0;
-    m_Em = 0;
     m_wv.clear();
     
     // don't forget to initialize the base class
-    FEMaterialPoint::Init();
+	FEMaterialPointData::Init();
 }
 
 void FEReactiveVEMaterialPoint::Update(const FETimeInfo& timeInfo)
 {
-    FEMaterialPoint::Update(timeInfo);
-    
-    m_Em = max(m_Em, m_Et);
+	FEMaterialPointData::Update(timeInfo);
 }
 
 //-----------------------------------------------------------------------------
 //! Serialize data to the archive
 void FEReactiveVEMaterialPoint::Serialize(DumpStream& ar)
 {
-    FEMaterialPoint::Serialize(ar);
+	FEMaterialPointData::Serialize(ar);
     
     if (ar.IsSaving())
     {
         int n = (int)m_Uv.size();
         ar << n;
         for (int i=0; i<n; ++i) ar << m_Uv[i] << m_Jv[i] << m_v[i] << m_f[i];
+        ar << m_Et;
+        int m = (int)m_wv.size();
+        ar << m;
+        for (int i=0; i<m; ++i) ar << m_wv[i];
     }
     else
     {
@@ -119,5 +107,10 @@ void FEReactiveVEMaterialPoint::Serialize(DumpStream& ar)
 		m_v.resize(n);
 		m_f.resize(n);
         for (int i=0; i<n; ++i) ar >> m_Uv[i] >> m_Jv[i] >> m_v[i] >> m_f[i];
+        ar >> m_Et;
+        int m;
+        ar >> m;
+		m_wv.resize(m);
+        for (int i=0; i<m; ++i) ar >> m_wv[i];
     }
 }

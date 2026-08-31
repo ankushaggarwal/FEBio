@@ -29,10 +29,10 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEBioFluidPlot.h"
 #include "FEFluidDomain3D.h"
-#include "FEFluidDomain2D.h"
 #include "FEFluidMaterial.h"
+#include "FEPolarFluidMaterial.h"
 #include "FEFluid.h"
-#include "FEFluidP.h"
+#include "FEPolarFluid.h"
 #include "FEFluidDomain.h"
 #include "FEFluidFSIDomain.h"
 #include "FEFluidFSI.h"
@@ -40,8 +40,6 @@ SOFTWARE.*/
 #include "FEBiphasicFSI.h"
 #include "FEMultiphasicFSIDomain.h"
 #include "FEMultiphasicFSI.h"
-#include "FEThermoFluid.h"
-#include "FEBioPlot/FEBioPlotFile.h"
 #include <FECore/FEModel.h>
 #include <FECore/FESurface.h>
 #include <FECore/writeplot.h>
@@ -125,7 +123,7 @@ bool FEPlotFluidDilatation::Save(FEMesh& m, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-//! Store the nodal dilatations
+//! Store the nodal effective fluid pressure
 bool FEPlotFluidEffectivePressure::Save(FEDomain& dom, FEDataStream& a)
 {
     // get the dilatation dof index
@@ -143,6 +141,21 @@ bool FEPlotFluidEffectivePressure::Save(FEDomain& dom, FEDataStream& a)
     return true;
 }
 
+//-----------------------------------------------------------------------------
+//! Store the nodal polar fluid angular velocity
+bool FEPlotNodalPolarFluidAngularVelocity::Save(FEMesh& m, FEDataStream& a)
+{
+    FEModel* fem = GetFEModel();
+    int dofGX = fem->GetDOFIndex("gx");
+    int dofGY = fem->GetDOFIndex("gy");
+    int dofGZ = fem->GetDOFIndex("gz");
+    
+    writeNodalValues<vec3d>(m, a, [=](const FENode& node) {
+        return node.get_vec3d(dofGX, dofGY, dofGZ);
+    });
+    return true;
+}
+
 //=============================================================================
 //                       S U R F A C E    D A T A
 //=============================================================================
@@ -156,15 +169,12 @@ bool FEPlotFluidSurfaceForce::Save(FESurface &surf, FEDataStream &a)
     int NF = pcs->Elements();
     vec3d fn(0,0,0);    // initialize
     
-    // initialize on the first pass to calculate the vectorial area of each surface element and to identify solid element associated with this surface element
-    if (m_binit) {
-        m_area.resize(NF);
-        for (int j=0; j<NF; ++j)
-        {
-            FESurfaceElement& el = pcs->Element(j);
-            m_area[j] = pcs->SurfaceNormal(el,0,0)*pcs->FaceArea(el);
-        }
-        m_binit = false;
+    // calculate the vectorial area of each surface element and to identify solid element associated with this surface element
+    m_area.resize(NF);
+    for (int j=0; j<NF; ++j)
+    {
+        FESurfaceElement& el = pcs->Element(j);
+        m_area[j] = pcs->SurfaceNormal(el,0,0)*pcs->FaceArea(el);
     }
     
     // calculate net fluid force
@@ -173,7 +183,7 @@ bool FEPlotFluidSurfaceForce::Save(FESurface &surf, FEDataStream &a)
 		FESurfaceElement& el = pcs->Element(j);
 
         // get the element this surface element belongs to
-        FEElement* pe = el.m_elem[0];
+        FEElement* pe = el.m_elem[0].pe;
         if (pe)
         {
             // get the material
@@ -181,20 +191,23 @@ bool FEPlotFluidSurfaceForce::Save(FESurface &surf, FEDataStream &a)
             FEFluidMaterial* pfluid = pm->ExtractProperty<FEFluidMaterial>();
 
             if (!pfluid) {
-                pe = el.m_elem[1];
+                pe = el.m_elem[1].pe;
                 if (pe) pfluid = GetFEModel()->GetMaterial(pe->GetMatID())->ExtractProperty<FEFluidMaterial>();
             }
 
             // see if this is a fluid element
             if (pfluid) {
+                FEPolarFluidMaterial* polar = pfluid->ExtractProperty<FEPolarFluidMaterial>();
                 // evaluate the average stress in this element
                 int nint = pe->GaussPoints();
-                mat3ds s(mat3dd(0));
+                mat3d s(mat3dd(0));
                 for (int n=0; n<nint; ++n)
                 {
                     FEMaterialPoint& mp = *pe->GetMaterialPoint(n);
                     FEFluidMaterialPoint& pt = *(mp.ExtractData<FEFluidMaterialPoint>());
                     s += pt.m_sf;
+                    if (polar)
+                        s += polar->GetViscousPolar()->SkewStress(mp);
                 }
                 s /= nint;
                 
@@ -213,6 +226,71 @@ bool FEPlotFluidSurfaceForce::Save(FESurface &surf, FEDataStream &a)
 }
 
 //-----------------------------------------------------------------------------
+bool FEPlotFluidSurfaceMoment::Save(FESurface &surf, FEDataStream &a)
+{
+    FESurface* pcs = &surf;
+    if (pcs == 0) return false;
+    
+    int NF = pcs->Elements();
+    vec3d mn(0,0,0);    // initialize
+    
+    // initialize on the first pass to calculate the vectorial area of each surface element and to identify solid element associated with this surface element
+    if (m_binit) {
+        m_area.resize(NF);
+        for (int j=0; j<NF; ++j)
+        {
+            FESurfaceElement& el = pcs->Element(j);
+            m_area[j] = pcs->SurfaceNormal(el,0,0)*pcs->FaceArea(el);
+        }
+        m_binit = false;
+    }
+    
+    // calculate net fluid moment
+    for (int j=0; j<NF; ++j)
+    {
+        FESurfaceElement& el = pcs->Element(j);
+        
+        // get the element this surface element belongs to
+        FEElement* pe = el.m_elem[0].pe;
+        if (pe)
+        {
+            // get the material
+            FEMaterial* pm = GetFEModel()->GetMaterial(pe->GetMatID());
+            FEPolarFluidMaterial* pfluid = pm->ExtractProperty<FEPolarFluidMaterial>();
+            
+            if (!pfluid) {
+                pe = el.m_elem[1].pe;
+                if (pe) pfluid = GetFEModel()->GetMaterial(pe->GetMatID())->ExtractProperty<FEPolarFluidMaterial>();
+            }
+            
+            // see if this is a fluid element
+            if (pfluid) {
+                // evaluate the average stress in this element
+                int nint = pe->GaussPoints();
+                mat3d s(mat3dd(0));
+                for (int n=0; n<nint; ++n)
+                {
+                    FEMaterialPoint& mp = *pe->GetMaterialPoint(n);
+                    if (pfluid->GetViscousPolar())
+                        s += pfluid->GetViscousPolar()->CoupleStress(mp);
+                }
+                s /= nint;
+                
+                // Evaluate contribution to net moment on surface.
+                // Negate the fluid couple vector since we want the couple vector on the surface,
+                // which is the opposite of the traction on the fluid.
+                mn -= s*m_area[j];
+            }
+        }
+    }
+    
+    // save results
+    a << mn;
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 // Plot contact pressure
 bool FEPlotFluidSurfacePressure::Save(FESurface &surf, FEDataStream& a)
 {
@@ -226,13 +304,13 @@ bool FEPlotFluidSurfacePressure::Save(FESurface &surf, FEDataStream& a)
         FESurfaceElement& el = pcs->Element(nface);
         double ef = pcs->Evaluate(nface, dof_EF);
         double T = pcs->Evaluate(nface, dof_T);
-        FEElement* pe = el.m_elem[0];
+        FEElement* pe = el.m_elem[0].pe;
         if (pe) {
             // get the material
             FEMaterial* pm = GetFEModel()->GetMaterial(pe->GetMatID());
             FEFluidMaterial* fluid = pm->ExtractProperty<FEFluidMaterial>();
             if (!fluid) {
-                pe = el.m_elem[1];
+                pe = el.m_elem[1].pe;
                 if (pe) fluid = GetFEModel()->GetMaterial(pe->GetMatID())->ExtractProperty<FEFluidMaterial>();
             }
             if (fluid) return fluid->Pressure(ef, T);
@@ -270,7 +348,7 @@ bool FEPlotFluidSurfaceTractionPower::Save(FESurface &surf, FEDataStream &a)
 		FESurfaceElement& el = pcs->Element(j);
 
         // get the element this surface element belongs to
-        FEElement* pe = el.m_elem[0];
+        FEElement* pe = el.m_elem[0].pe;
         if (pe)
         {
             // get the material
@@ -328,7 +406,7 @@ bool FEPlotFluidSurfaceEnergyFlux::Save(FESurface &surf, FEDataStream &a)
 		FESurfaceElement& el = pcs->Element(j);
 
         // get the element this surface element belongs to
-        FEElement* pe = el.m_elem[0];
+        FEElement* pe = el.m_elem[0].pe;
         if (pe)
         {
             // get the material
@@ -383,7 +461,7 @@ bool FEPlotFluidMassFlowRate::Save(FESurface &surf, FEDataStream &a)
 		FESurfaceElement& el = pcs->Element(j);
 
         // get the element this surface element belongs to
-        FEElement* pe = el.m_elem[0];
+        FEElement* pe = el.m_elem[0].pe;
         if (pe)
         {
             // get the material
@@ -450,7 +528,7 @@ bool FEPlotFluidFlowRate::Save(FESurface &surf, FEDataStream &a)
 		FESurfaceElement& el = pcs->Element(j);
 
 		// get the element this surface element belongs to
-		FEElement* pe = el.m_elem[0];
+		FEElement* pe = el.m_elem[0].pe;
 		if (pe)
 		{
 			// evaluate the average fluid flux in this element
@@ -507,49 +585,33 @@ bool FEPlotElasticFluidPressure::Save(FEDomain &dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-bool FEPlotFluidTemperature::Save(FEDomain &dom, FEDataStream& a)
-{
-    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
-	if (pfluid == 0) return false;
-
-	writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
-		return pfluid->Temperature(const_cast<FEMaterialPoint&>(mp));
-	});
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// NOTE: This is not thread safe!
 class FEFluidVolumeRatio
 {
 public:
-	FEFluidVolumeRatio(FEModel* fem, FESolidDomain& dom) : m_dom(dom), m_el(0)
+	FEFluidVolumeRatio(FEModel* fem, FESolidDomain& dom) : m_dom(dom)
 	{
-		dofEF = fem->GetDOFIndex("ef");
+		m_dofEF = fem->GetDOFIndex("ef");
 	}
 
 	double operator()(const FEMaterialPoint& mp)
 	{
-		if (m_el != mp.m_elem)
-		{
-			m_el = dynamic_cast<FESolidElement*>(mp.m_elem);
-			FESolidElement& el = *m_el;
-			FEMesh& mesh = *m_dom.GetMesh();
-			int neln = el.Nodes();
-			for (int j = 0; j<neln; ++j)
-				et[j] = mesh.Node(el.m_node[j]).get(dofEF);
-		}
+		FESolidElement* pel = dynamic_cast<FESolidElement*>(mp.m_elem);
+		if (pel == nullptr) return 0.0;
 
-		double  Jf = 1 + m_el->Evaluate(et, mp.m_index);
+		FESolidElement& el = *pel;
+		FEMesh& mesh = *m_dom.GetMesh();
+		int neln = el.Nodes();
+		double et[FEElement::MAX_NODES];
+		for (int j = 0; j<neln; ++j)
+				et[j] = mesh.Node(el.m_node[j]).get(m_dofEF);
+		
+		double  Jf = 1.0 + el.Evaluate(et, mp.m_index);
 		return Jf;
 	}
 
 private:
 	FESolidDomain&	m_dom;
-	FESolidElement*	m_el;
-	int dofEF;
-
-	double et[FEElement::MAX_NODES];
+	int m_dofEF;
 };
 
 bool FEPlotFluidVolumeRatio::Save(FEDomain &dom, FEDataStream& a)
@@ -567,39 +629,35 @@ bool FEPlotFluidVolumeRatio::Save(FEDomain &dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-// NOTE: This is not thread safe!
 class FEFluidDensity
 {
 public:
-	FEFluidDensity(FEModel* fem, FESolidDomain& dom, FEFluidMaterial* pm) : m_dom(dom), m_mat(pm), m_el(0)
+	FEFluidDensity(FEModel* fem, FESolidDomain& dom, FEFluidMaterial* pm) : m_dom(dom), m_mat(pm)
 	{
-		dofEF = fem->GetDOFIndex("ef");
+		m_dofEF = fem->GetDOFIndex("ef");
 	}
 
 	double operator()(const FEMaterialPoint& mp)
 	{
-		if (m_el != mp.m_elem)
-		{
-			m_el = dynamic_cast<FESolidElement*>(mp.m_elem);
-			FESolidElement& el = *m_el;
-			FEMesh& mesh = *m_dom.GetMesh();
-			int neln = el.Nodes();
-			for (int j = 0; j<neln; ++j)
-				et[j] = mesh.Node(el.m_node[j]).get(dofEF);
-		}
+		FESolidElement* pel = dynamic_cast<FESolidElement*>(mp.m_elem);
+		if (pel == nullptr) return 0.0;
+			
+		FESolidElement& el = *pel;
+		FEMesh& mesh = *m_dom.GetMesh();
+		int neln = el.Nodes();
+		double et[FEElement::MAX_NODES];
+		for (int j = 0; j<neln; ++j)
+			et[j] = mesh.Node(el.m_node[j]).get(m_dofEF);
 
 		double rhor = m_mat->m_rhor;
-		double Jf = 1 + m_el->Evaluate(et, mp.m_index);
+		double Jf = 1 + el.Evaluate(et, mp.m_index);
 		return rhor / Jf;
 	}
 
 private:
 	FESolidDomain&	m_dom;
-	FESolidElement*	m_el;
 	FEFluidMaterial*	m_mat;
-	int dofEF;
-
-	double et[FEElement::MAX_NODES];
+	int m_dofEF;
 };
 
 bool FEPlotFluidDensity::Save(FEDomain &dom, FEDataStream& a)
@@ -617,37 +675,36 @@ bool FEPlotFluidDensity::Save(FEDomain &dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-// NOTE: This is not thread safe!
 class FEFluidDensityRate
 {
 public:
-	FEFluidDensityRate(FEModel* fem, FESolidDomain& dom, FEFluidMaterial* pm) : m_dom(dom), m_el(0), m_mat(pm)
+	FEFluidDensityRate(FEModel* fem, FESolidDomain& dom, FEFluidMaterial* pm) : m_dom(dom), m_mat(pm)
 	{
-		dofVX = fem->GetDOFIndex("vx");
-		dofVY = fem->GetDOFIndex("vy");
-		dofVZ = fem->GetDOFIndex("vz");
-		dofEF = fem->GetDOFIndex("ef");
-		dofAEF = fem->GetDOFIndex("aef");
+		m_dofVX = fem->GetDOFIndex("vx");
+		m_dofVY = fem->GetDOFIndex("vy");
+		m_dofVZ = fem->GetDOFIndex("vz");
+		m_dofEF = fem->GetDOFIndex("ef");
+		m_dofAEF = fem->GetDOFIndex("aef");
 	}
 
 	double operator()(const FEMaterialPoint& mp)
 	{
-		if (m_el != mp.m_elem)
-		{
-			m_el = dynamic_cast<FESolidElement*>(mp.m_elem);
+		FESolidElement* pel = dynamic_cast<FESolidElement*>(mp.m_elem);
+		if (pel == nullptr) return 0.0;
 
-			FESolidElement& el = *m_el;
-			FEMesh& mesh = *m_dom.GetMesh();
+		FESolidElement& el = *pel;
+		FEMesh& mesh = *m_dom.GetMesh();
 
-			int neln = m_el->Nodes();
-			for (int j = 0; j<neln; ++j) {
-				vt[j] = mesh.Node(el.m_node[j]).get_vec3d(dofVX, dofVY, dofVZ);
-				et[j] = mesh.Node(el.m_node[j]).get(dofEF);
-				aet[j] = mesh.Node(el.m_node[j]).get(dofAEF);
-			}
+		vec3d vt[FEElement::MAX_NODES];
+		double et[FEElement::MAX_NODES];
+		double aet[FEElement::MAX_NODES];
+		int neln = el.Nodes();
+		for (int j = 0; j<neln; ++j) {
+			vt[j] = mesh.Node(el.m_node[j]).get_vec3d(m_dofVX, m_dofVY, m_dofVZ);
+			et[j] = mesh.Node(el.m_node[j]).get(m_dofEF);
+			aet[j] = mesh.Node(el.m_node[j]).get(m_dofAEF);
 		}
 
-		FESolidElement& el = *m_el;
 		double rhor = m_mat->m_rhor;
 		double Jf = 1.0 + el.Evaluate(et, mp.m_index);
 		double Jfdot = el.Evaluate(aet, mp.m_index);
@@ -658,14 +715,10 @@ public:
 
 private:
 	FESolidDomain&	m_dom;
-	FESolidElement*	m_el;
 	FEFluidMaterial* m_mat;
 
-	int dofVX, dofVY, dofVZ;
-	int dofEF, dofAEF;
-	vec3d vt[FEElement::MAX_NODES];
-	double et[FEElement::MAX_NODES];
-	double aet[FEElement::MAX_NODES];
+	int m_dofVX, m_dofVY, m_dofVZ;
+	int m_dofEF, m_dofAEF;
 };
 
 bool FEPlotFluidDensityRate::Save(FEDomain &dom, FEDataStream& a)
@@ -681,6 +734,45 @@ bool FEPlotFluidDensityRate::Save(FEDomain &dom, FEDataStream& a)
     }
     
     return false;
+}
+
+//-----------------------------------------------------------------------------
+class FEFluidBodyForce
+{
+public:
+    FEFluidBodyForce(FEModel* fem, FESolidDomain& dom) : m_fem(fem), m_dom(dom) {}
+    
+    vec3d operator()(const FEMaterialPoint& mp)
+    {
+        int NBL = m_fem->ModelLoads();
+        vec3d bf(0,0,0);
+        for (int j = 0; j<NBL; ++j)
+        {
+            FEBodyForce* pbf = dynamic_cast<FEBodyForce*>(m_fem->ModelLoad(j));
+			FEMaterialPoint& pt = const_cast<FEMaterialPoint&>(mp);
+			if (pbf && pbf->IsActive()) bf += pbf->force(pt);
+        }
+		// FEBio actually applies the negative of the body force
+        return -bf;
+    }
+
+private:
+    FESolidDomain&    m_dom;
+    FEModel*          m_fem;
+};
+
+bool FEPlotFluidBodyForce::Save(FEDomain &dom, FEDataStream& a)
+{
+    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
+    if (pfluid == 0) return false;
+
+    if (dom.Class() == FE_DOMAIN_SOLID)
+    {
+        FESolidDomain& sd = static_cast<FESolidDomain&>(dom);
+        writeAverageElementValue<vec3d>(dom, a, FEFluidBodyForce(GetFEModel(), sd));
+        return true;
+    }
+    return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -707,7 +799,10 @@ bool FEPlotRelativeFluidVelocity::Save(FEDomain &dom, FEDataStream& a)
     writeAverageElementValue<vec3d>(dom, a, [](const FEMaterialPoint& mp) {
         const FEFluidMaterialPoint* fpt = mp.ExtractData<FEFluidMaterialPoint>();
         const FEElasticMaterialPoint* ept = mp.ExtractData<FEElasticMaterialPoint>();
-        return (fpt ? fpt->m_vft - ept->m_v : vec3d(0.0));
+        vec3d vf(0,0,0), vs(0,0,0);
+        if (fpt) vf = fpt->m_vft;
+        if (ept) vs = ept->m_v;
+        return vf - vs;
     });
     
     return true;
@@ -826,15 +921,50 @@ bool FEPlotFluidVorticity::Save(FEDomain &dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-bool FEPlotFluidHeatFlux::Save(FEDomain &dom, FEDataStream& a)
+bool FEPlotPolarFluidAngularVelocity::Save(FEDomain &dom, FEDataStream& a)
 {
     FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
     if (pfluid == 0) return false;
-
+    
     // write solid element data
     writeAverageElementValue<vec3d>(dom, a, [](const FEMaterialPoint& mp) {
-        const FEThermoFluidMaterialPoint* ppt = mp.ExtractData<FEThermoFluidMaterialPoint>();
-        return (ppt ? ppt->m_q : vec3d(0.));
+        const FEPolarFluidMaterialPoint* ppt = mp.ExtractData<FEPolarFluidMaterialPoint>();
+        const FEFluidMaterialPoint* pt = mp.ExtractData<FEFluidMaterialPoint>();
+        vec3d g(0,0,0);
+        if (ppt) g = ppt->m_gf;
+        else if (pt) g = pt->Vorticity()/2;
+        return g;
+    });
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotPolarFluidRelativeAngularVelocity::Save(FEDomain &dom, FEDataStream& a)
+{
+    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
+    if (pfluid == 0) return false;
+    
+    // write solid element data
+    writeAverageElementValue<vec3d>(dom, a, [](const FEMaterialPoint& mp) {
+        const FEFluidMaterialPoint* pt = mp.ExtractData<FEFluidMaterialPoint>();
+        const FEPolarFluidMaterialPoint* ppt = mp.ExtractData<FEPolarFluidMaterialPoint>();
+        return (ppt ? ppt->m_gf - pt->Vorticity()/2 : vec3d(0.));
+    });
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotPolarFluidRegionalAngularVelocity::Save(FEDomain &dom, FEDataStream& a)
+{
+    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
+    if (pfluid == 0) return false;
+    
+    // write solid element data
+    writeAverageElementValue<vec3d>(dom, a, [](const FEMaterialPoint& mp) {
+        const FEFluidMaterialPoint* ppt = mp.ExtractData<FEFluidMaterialPoint>();
+        return (ppt ? ppt->Vorticity()/2 : vec3d(0.));
     });
     
     return true;
@@ -959,6 +1089,21 @@ bool FEPlotFluidEnergyDensity::Save(FEDomain &dom, FEDataStream& a)
 		FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
 		return pfluid->EnergyDensity(mp_noconst);
 	});
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotFluidBulkModulus::Save(FEDomain &dom, FEDataStream& a)
+{
+    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
+    if (pfluid == 0) return false;
+
+    // write solid element data
+    writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
+        FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
+        return pfluid->BulkModulus(mp_noconst);
+    });
 
     return true;
 }
@@ -1115,14 +1260,14 @@ bool FEPlotFluidSpecificInternalEnergy::Save(FEDomain &dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-bool FEPlotFluidSpecificGageEnthalpy::Save(FEDomain &dom, FEDataStream& a)
+bool FEPlotFluidSpecificGaugeEnthalpy::Save(FEDomain &dom, FEDataStream& a)
 {
     FEElasticFluid* pfluid = dom.GetMaterial()->ExtractProperty<FEElasticFluid>();
     if (pfluid == 0) return false;
 
     writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
         FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
-        return pfluid->SpecificGageEnthalpy(mp_noconst);
+        return pfluid->SpecificGaugeEnthalpy(mp_noconst);
     });
 
     return true;
@@ -1157,44 +1302,16 @@ bool FEPlotFluidSpecificStrainEnergy::Save(FEDomain &dom, FEDataStream& a)
 }
 
 //-----------------------------------------------------------------------------
-bool FEPlotFluidIsochoricSpecificHeatCapacity::Save(FEDomain &dom, FEDataStream& a)
+bool FEPlotFluidPressureTangentStrain::Save(FEDomain &dom, FEDataStream& a)
 {
     FEElasticFluid* pfluid = dom.GetMaterial()->ExtractProperty<FEElasticFluid>();
-    if (pfluid == 0) return false;
-
-    writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
-        FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
-        return pfluid->IsochoricSpecificHeatCapacity(mp_noconst);
-    });
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool FEPlotFluidIsobaricSpecificHeatCapacity::Save(FEDomain &dom, FEDataStream& a)
-{
-    FEElasticFluid* pfluid = dom.GetMaterial()->ExtractProperty<FEElasticFluid>();
-    if (pfluid == 0) return false;
-
-    writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
-        FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
-        return pfluid->IsobaricSpecificHeatCapacity(mp_noconst);
-    });
-    
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool FEPlotFluidThermalConductivity::Save(FEDomain &dom, FEDataStream& a)
-{
-    FEFluidThermalConductivity* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidThermalConductivity>();
     if (pfluid == 0) return false;
     
     writeAverageElementValue<double>(dom, a, [=](const FEMaterialPoint& mp) {
         FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
-        return pfluid->ThermalConductivity(mp_noconst);
+        return pfluid->Tangent_Strain(mp_noconst);
     });
-
+    
     return true;
 }
 
@@ -1236,4 +1353,136 @@ bool FEPlotFluidShearStressError::Save(FEDomain& dom, FEDataStream& a)
 	}
 
 	return false;
+}
+
+//-----------------------------------------------------------------------------
+//! Store the average polar fluid stresses for each element.
+bool FEPlotPolarFluidStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEViscousPolarFluid* vpfluid = dom.GetMaterial()->ExtractProperty<FEViscousPolarFluid>();
+    if (vpfluid == 0) return false;
+    FEViscousFluid* vfluid = dom.GetMaterial()->ExtractProperty<FEViscousFluid>();
+
+    // write solid element data
+    writeAverageElementValue<mat3d>(dom, a, [&](const FEMaterialPoint& mp) {
+        FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
+        return (vpfluid->SkewStress(mp_noconst) + vfluid->Stress(mp_noconst));
+    });
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+//! Store the average polar fluid couple stresses for each element.
+bool FEPlotPolarFluidCoupleStress::Save(FEDomain& dom, FEDataStream& a)
+{
+    FEViscousPolarFluid* pfluid = dom.GetMaterial()->ExtractProperty<FEViscousPolarFluid>();
+    if (pfluid == 0) return false;
+
+    // write solid element data
+    writeAverageElementValue<mat3d>(dom, a, [&](const FEMaterialPoint& mp) {
+        FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
+        return pfluid->CoupleStress(mp_noconst);
+    });
+    
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotFluidRelativeReynoldsNumber::Save(FEDomain &dom, FEDataStream& a)
+{
+    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
+    if (pfluid == 0) return false;
+    
+    writeAverageElementValue<double>(dom, a, [&pfluid](const FEMaterialPoint& mp) {
+        const FEFluidMaterialPoint* fpt = mp.ExtractData<FEFluidMaterialPoint>();
+        const FEElasticMaterialPoint* ept = mp.ExtractData<FEElasticMaterialPoint>();
+        FEMaterialPoint& mp_noconst = const_cast<FEMaterialPoint&>(mp);
+        double nu = pfluid->KinematicViscosity(mp_noconst);
+        vec3d v(0,0,0);
+        if (ept) v = ept->m_v;
+        return (fpt->m_vft - v).Length()/nu;
+    });
+    
+    return true;
+}
+
+//=================================================================================================
+//-----------------------------------------------------------------------------
+FEPlotFluidRelativePecletNumber::FEPlotFluidRelativePecletNumber(FEModel* pfem) : FEPlotDomainData(pfem, PLT_ARRAY, FMT_ITEM)
+{
+	if (pfem)
+	{
+		DOFS& dofs = pfem->GetDOFS();
+		int nsol = dofs.GetVariableSize("concentration");
+		SetArraySize(nsol);
+
+		// collect the names
+		int ndata = pfem->GlobalDataItems();
+		vector<string> s;
+		for (int i = 0; i < ndata; ++i)
+		{
+			FESoluteData* ps = dynamic_cast<FESoluteData*>(pfem->GetGlobalData(i));
+			if (ps)
+			{
+				s.push_back(ps->GetName());
+				m_sol.push_back(ps->GetID());
+			}
+		}
+		assert(nsol == (int)s.size());
+		SetArrayNames(s);
+	}
+    SetUnits(UNIT_RECIPROCAL_LENGTH);
+}
+
+//-----------------------------------------------------------------------------
+bool FEPlotFluidRelativePecletNumber::Save(FEDomain &dom, FEDataStream& a)
+{
+    FESoluteInterface* pm = dynamic_cast<FESoluteInterface*>(dom.GetMaterial());
+    if (pm == 0) return false;
+    
+    FEFluidMaterial* pfluid = dom.GetMaterial()->ExtractProperty<FEFluidMaterial>();
+    if (pfluid == 0) return false;
+    
+    // figure out the local solute IDs. This depends on the material
+    int nsols = (int)m_sol.size();
+    vector<int> lid(nsols, -1);
+    int negs = 0;
+    for (int i = 0; i<(int)m_sol.size(); ++i)
+    {
+        lid[i] = pm->FindLocalSoluteID(m_sol[i]);
+        if (lid[i] < 0) negs++;
+    }
+    if (negs == nsols) return false;
+    
+    // loop over all elements
+    int N = dom.Elements();
+    for (int i = 0; i<N; ++i)
+    {
+        FEElement& el = dom.ElementRef(i);
+        
+        for (int k=0; k<nsols; ++k)
+        {
+            int nsid = lid[k];
+            if (nsid == -1) a << 0.f;
+            else
+            {
+                // calculate average relative Peclet number
+                double ew = 0;
+                for (int j = 0; j<el.GaussPoints(); ++j)
+                {
+                    FEMaterialPoint& mp = *el.GetMaterialPoint(j);
+                    const FEFluidMaterialPoint* fpt = mp.ExtractData<FEFluidMaterialPoint>();
+                    const FEElasticMaterialPoint* ept = mp.ExtractData<FEElasticMaterialPoint>();
+                    vec3d v(0,0,0);
+                    if (ept) v = ept->m_v;
+                    ew += (fpt->m_vft - v).Length()/pm->GetFreeDiffusivity(mp, nsid);
+                }
+                ew /= el.GaussPoints();
+                a << ew;
+            }
+        }
+        
+    }
+    return true;
 }

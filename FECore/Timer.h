@@ -23,16 +23,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
-
-
-
 #pragma once
 #include "fecore_api.h"
-#include "FECoreKernel.h"
-#include <vector>
-#include <string>
 
-//-----------------------------------------------------------------------------
+class FEModel;
+
 //! This class implements a simple timer. 
 
 //! The start function starts the timer, the stop
@@ -41,12 +36,12 @@ SOFTWARE.*/
 
 class FECORE_API Timer
 {
+	struct Imp;
+
 public:
 	//! constructor
-	Timer();
-
-	//! constructor
-	~Timer();
+	Timer(bool isTracked = true);
+    ~Timer();
 
 	//! Start the timer
 	void start();
@@ -54,7 +49,12 @@ public:
 	//! Stop the timer
 	void stop();
 
-	//! Reset the timer
+	//! pause the timer
+	void pause();
+
+	//! continue
+	void unpause();
+
 	void reset();
 
 	//! Get the elapsed time
@@ -63,6 +63,9 @@ public:
 	//! Get the time in seconds
 	double GetTime();
 
+	//! Get the exclusive time (i.e. time when not paused)
+	double GetExclusiveTime();
+
 	//! return the time as a text string
 	void time_str(char* sz);
 
@@ -70,17 +73,43 @@ public:
 	double peek();
 
 	//! see if the timer is running
-	bool isRunning() const { return m_brunning; }
+	bool isRunning() const;
 
 public:
 	static void time_str(double fsec, char* sz);
 	static void GetTime(double fsec, int& nhour, int& nmin, int& nsec);
+	static Timer* activeTimer();
 
 private:
-	void*	m_pimpl;	//!< local timing data (using PIMPL ididom to hide OS specifics)
+	Imp*	m;	//!< local timing data (using PIMPL ididom)
+};
 
-	bool	m_brunning;	//!< flag indicating whether start was called
-	double	m_sec;		//!< accumulated time so far in seconds
+//-----------------------------------------------------------------------------
+class FEModel;
+
+//-----------------------------------------------------------------------------
+// Timer IDs
+enum TimerID {
+	Timer_Init,
+	Timer_Update,
+	Timer_LinSol_Factor,
+	Timer_LinSol_Backsolve,
+	Timer_Reform,
+	Timer_Residual,
+	Timer_Stiffness,
+	Timer_QNUpdate,
+	Timer_Serialize,
+	Timer_ModelSolve,
+	Timer_Callback,
+	Timer_USER1,
+	Timer_USER2,
+	Timer_USER3,
+	Timer_USER4,
+	Timer_USER5,
+	Timer_USER6,
+	Timer_USER7,
+	Timer_USER8,
+	TIMER_COUNT // leave this at the end so that it equals the nr. of timers we need
 };
 
 //-----------------------------------------------------------------------------
@@ -92,14 +121,16 @@ private:
 class FECORE_API TimerTracker
 {
 public:
-	TimerTracker(Timer* timer) { 
-		if (timer && (timer->isRunning() == false)) { m_timer = timer; timer->start(); }
-		else m_timer = nullptr; 
-	};
+	TimerTracker(FEModel* fem, int timerId);
+	TimerTracker(Timer* timer)
+	{
+		if (timer && !timer->isRunning()) { m_timer = timer; timer->start(); }
+		else m_timer = nullptr;
+	}
 	~TimerTracker() { if (m_timer) m_timer->stop(); }
 
 private:
 	Timer*	m_timer;
 };
 
-#define TRACK_TIME(timerId) TimerTracker _trackTimer(GetFEModel()->GetTimer(timerId));
+#define TRACK_TIME(timerId) TimerTracker _trackTimer(GetFEModel(), timerId);

@@ -29,20 +29,22 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include <limits>
 #include "FE2DTransIsoMooneyRivlin.h"
+#include <FECore/FEConstValueVec3.h>
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FE2DTransIsoMooneyRivlin, FEUncoupledMaterial)
-	ADD_PARAMETER(m_c1, FE_RANGE_GREATER(0.0), "c1");
-	ADD_PARAMETER(m_c2, "c2");
+	ADD_PARAMETER(m_c1, FE_RANGE_GREATER(0.0), "c1")->setUnits(UNIT_PRESSURE);
+	ADD_PARAMETER(m_c2, "c2")->setUnits(UNIT_PRESSURE);
 	ADD_PARAMETER(m_w, 2, "w");
-	ADD_PARAMETER(m_c3, "c3");
+	ADD_PARAMETER(m_c3, "c3")->setUnits(UNIT_PRESSURE);
 	ADD_PARAMETER(m_c4, "c4");
-	ADD_PARAMETER(m_c5, "c5");
+	ADD_PARAMETER(m_c5, "c5")->setUnits(UNIT_PRESSURE);
 	ADD_PARAMETER(m_lam1, FE_RANGE_GREATER_OR_EQUAL(1.0), "lam_max");
 	ADD_PARAMETER(m_a, 2, "a");
-	ADD_PARAMETER(m_ac, "active_contraction");
-	ADD_PARAMETER(m_fiber, "fiber");
-	ADD_PARAMETER(m_epsf, "epsilon_scale");
+	ADD_PARAMETER(m_ac, "active_contraction")->setUnits(UNIT_PRESSURE);;
+
+	ADD_PROPERTY(m_fiber, "fiber");
+
 END_FECORE_CLASS();
 
 double FE2DTransIsoMooneyRivlin::m_cth[FE2DTransIsoMooneyRivlin::NSTEPS];
@@ -80,7 +82,7 @@ FE2DTransIsoMooneyRivlin::FE2DTransIsoMooneyRivlin(FEModel* pfem) : FEUncoupledM
 
 	m_w[0] = m_w[1] = 1;
 
-	m_fiber = vec3d(1, 0, 0);
+	m_fiber = nullptr;
 
 	m_epsf = 0.;
 }
@@ -95,7 +97,7 @@ mat3ds FE2DTransIsoMooneyRivlin::DevStress(FEMaterialPoint& mp)
 	const double third = 1.0/3.0;
 
 	// get the "fiber" direction
-	vec3d r = m_fiber(mp); r.unit();
+	vec3d r = m_fiber->unitVector(mp);
 
 	// setup a rotation
 	quatd q(vec3d(1, 0, 0), r);
@@ -206,7 +208,7 @@ tens4ds FE2DTransIsoMooneyRivlin::DevTangent(FEMaterialPoint& mp)
 	FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
 
 	// get the "fiber" direction
-	vec3d r = m_fiber(mp); r.unit();
+	vec3d r = m_fiber->unitVector(mp);
 
 	// setup a rotation
 	quatd q(vec3d(1, 0, 0), r);
@@ -217,9 +219,6 @@ tens4ds FE2DTransIsoMooneyRivlin::DevTangent(FEMaterialPoint& mp)
 	double Jm13 = pow(J, -1.0/3.0);
 	double Jm23 = Jm13*Jm13;
 	double Ji = 1.0/J;
-
-	// deviatoric cauchy-stress, trs = trace[s]/3
-	mat3ds devs = pt.m_s.dev();
 
 	// deviatoric right Cauchy-Green tensor: C = Ft*F
 	mat3ds C = pt.DevRightCauchyGreen();
@@ -242,6 +241,10 @@ tens4ds FE2DTransIsoMooneyRivlin::DevTangent(FEMaterialPoint& mp)
 	double W2 = m_c2;
 
 	// --- M A T R I X   C O N T R I B U T I O N ---
+
+	// deviatoric cauchy-stress, trs = trace[s]/3
+	mat3ds T = B * (W1 + W2 * I1) - B2 * W2;
+	mat3ds devs = T.dev() * (2.0 / J);
 
 	// calculate dWdC:C
 	double WC = W1*I1 + 2*W2*I2;

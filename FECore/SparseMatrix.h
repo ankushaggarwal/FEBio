@@ -58,7 +58,7 @@ public:
 	bool IsSquare() const { return (m_nrow == m_ncol); }
 
 	//! return number of nonzeros
-	int NonZeroes() const { return m_nsize; }
+	size_t NonZeroes() const { return m_nsize; }
 
 public: // functions to be overwritten in derived classes
 
@@ -93,7 +93,7 @@ public: // functions to be overwritten in derived classes
 	virtual void Clear();
 
 	//! scale matrix
-	virtual void scale(const vector<double>& L, const vector<double>& R);
+	virtual void scale(const std::vector<double>& L, const std::vector<double>& R);
 
 public:
 	//! multiply with vector
@@ -110,5 +110,5 @@ public:
 protected:
 	// NOTE: These values are set by derived classes
 	int	m_nrow, m_ncol;		//!< dimension of matrix
-	int	m_nsize;			//!< number of nonzeroes (i.e. matrix elements actually allocated)
+	size_t m_nsize;			//!< number of nonzeroes (i.e. matrix elements actually allocated)
 };

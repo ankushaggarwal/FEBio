@@ -31,6 +31,11 @@ SOFTWARE.*/
 #include "FEMaterial.h"
 #include "tools.h"
 #include "log.h"
+#include "FEModel.h"
+
+BEGIN_FECORE_CLASS(FESolidDomain, FEDomain)
+	ADD_PROPERTY(m_matAxis, "mat_axis", FEProperty::Optional);
+END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
 FESolidDomain::FESolidDomain(FEModel* pfem) : FEDomain(FE_DOMAIN_SOLID, pfem), m_dofU(pfem), m_dofSU(pfem)
@@ -79,10 +84,19 @@ int FESolidDomain::Elements() const { return (int)m_Elem.size(); }
 
 //-----------------------------------------------------------------------------
 //! loop over elements
-void FESolidDomain::ForEachSolidElement(std::function<void(FESolidElement& el)> f)
+void FESolidDomain::ForEachSolidElement(std::function<void(FESolidElement& el)> f, bool runInParallel)
 {
 	int NE = Elements();
-	for (int i = 0; i < NE; ++i) f(m_Elem[i]);
+	if (runInParallel)
+	{
+#pragma omp parallel for
+		for (int i = 0; i < NE; ++i) 
+			f(m_Elem[i]);
+	}
+	else
+	{
+		for (int i = 0; i < NE; ++i) f(m_Elem[i]);
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -136,7 +150,7 @@ bool FESolidDomain::Init()
 				// material point coordinates
 				mp.m_r0 = el.Evaluate(r0, n);
 			}
-		});
+		}, false);
 	}
 	catch (NegativeJacobian e)
 	{
@@ -151,6 +165,37 @@ bool FESolidDomain::Init()
 // Reset data
 void FESolidDomain::Reset()
 {
+	// re-evaluate the material points initial position and jacobian
+	ForEachSolidElement([=](FESolidElement& el) {
+
+		// evaluate nodal coordinates
+		const int NELN = FEElement::MAX_NODES;
+		vec3d r0[NELN], r[NELN], v[NELN], a[NELN];
+		int neln = el.Nodes();
+		for (int j = 0; j < neln; ++j)
+		{
+			FENode& node = m_pMesh->Node(el.m_node[j]);
+			r0[j] = node.m_r0;
+		}
+
+		// initialize reference Jacobians
+		double Ji[3][3];
+
+		// loop over the integration points
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			FEMaterialPoint& mp = *el.GetMaterialPoint(n);
+
+			// initial Jacobian
+			mp.m_J0 = invjac0(el, Ji, n);
+			el.m_J0i[n] = mat3d(Ji);
+
+			// material point coordinates
+			mp.m_r0 = el.Evaluate(r0, n);
+		}
+	}, false); // don't run in parallel since this may throw exceptions!
+
 	ForEachMaterialPoint([](FEMaterialPoint& mp) {
 		mp.Init();
 	});
@@ -396,9 +441,9 @@ void FESolidDomain::GetCurrentNodalCoordinates(const FESolidElement& el, vec3d* 
 		{
 			if (el.m_bitfc[i]) {
 				FENode& nd = m_pMesh->Node(el.m_node[i]);
-				rt[i] -= nd.m_d0 + rt[i] - nd.m_r0
-					- nd.get_vec3d(m_dofSU[0], m_dofSU[1], m_dofSU[2])*alpha
-					- nd.get_vec3d_prev(m_dofSU[0], m_dofSU[1], m_dofSU[2])*(1 - alpha);
+				rt[i] = nd.m_r0 - nd.m_d0 \
+					+ nd.get_vec3d(m_dofSU[0], m_dofSU[1], m_dofSU[2])*alpha \
+					+ nd.get_vec3d_prev(m_dofSU[0], m_dofSU[1], m_dofSU[2])*(1 - alpha);
 			}
 		}
 	}
@@ -990,8 +1035,9 @@ double FESolidDomain::defgradp(FESolidElement &el, mat3d &F, int n)
 	GetPreviousNodalCoordinates(el, r);
     
     // calculate inverse jacobian
-    double Ji[3][3];
-    invjac0(el, Ji, n);
+//    double Ji[3][3];
+//    invjac0(el, Ji, n);
+	mat3d& Ji = el.m_J0i[n];
 
 	// shape function derivatives
 	double *Grn = el.Gr(n);
@@ -2368,6 +2414,31 @@ double FESolidDomain::ShapeGradient0(FESolidElement& el, int n, vec3d* GradH)
     return detJ0;
 }
 
+double FESolidDomain::ShapeGradient0(FESolidElement& el, int order, int n, vec3d* GradH)
+{
+	// calculate jacobian
+	double Ji[3][3];
+	double detJ0 = invjac0(el, Ji, n);
+
+	// evaluate shape function derivatives
+	int ne = el.Nodes();
+	for (int i = 0; i < ne; ++i)
+	{
+		double Gr = el.Gr(order, n)[i];
+		double Gs = el.Gs(order, n)[i];
+		double Gt = el.Gt(order, n)[i];
+
+		// calculate global gradient of shape functions
+		// note that we need the transposed of Ji, not Ji itself !
+		GradH[i].x = Ji[0][0] * Gr + Ji[1][0] * Gs + Ji[2][0] * Gt;
+		GradH[i].y = Ji[0][1] * Gr + Ji[1][1] * Gs + Ji[2][1] * Gt;
+		GradH[i].z = Ji[0][2] * Gr + Ji[1][2] * Gs + Ji[2][2] * Gt;
+	}
+
+	return detJ0;
+}
+
+
 //-----------------------------------------------------------------------------
 double FESolidDomain::ShapeGradient(FESolidElement& el, double r, double s, double t, vec3d* GradH)
 {
@@ -2533,11 +2604,10 @@ void FESolidDomain::LoadVector(
 
 	// degrees of freedom per node
 	int dofPerNode = dofList.Size();
-	std::vector<double> val(dofPerNode, 0.0);
 
 	// loop over all the elements
 	int NE = Elements();
-	//#pragma omp parallel for 
+	#pragma omp parallel for 
 	for (int i = 0; i<NE; ++i)
 	{
 		// get the next element
@@ -2547,6 +2617,8 @@ void FESolidDomain::LoadVector(
 		// only consider active elements
 		if (el.isActive()) 
 		{
+			std::vector<double> val(dofPerNode, 0.0);
+
 			// total size of the element vector
 			int ndof = dofPerNode * el.Nodes();
 
@@ -2599,6 +2671,8 @@ void FESolidDomain::LoadVector(
 //-----------------------------------------------------------------------------
 void FESolidDomain::LoadStiffness(FELinearSystem& LS, const FEDofList& dofList_a, const FEDofList& dofList_b, FEVolumeMatrixIntegrand f)
 {
+#pragma omp parallel shared(f)
+	{
 	FEElementMatrix ke;
 
 	int dofPerNode_a = dofList_a.Size();
@@ -2610,64 +2684,68 @@ void FESolidDomain::LoadStiffness(FELinearSystem& LS, const FEDofList& dofList_a
 	matrix kab(dofPerNode_a, dofPerNode_b);
 
 	int NE = Elements();
-	for (int m = 0; m<NE; ++m)
+	#pragma omp for nowait
+	for (int m = 0; m < NE; ++m)
 	{
 		// get the element
 		FESolidElement& el = Element(m);
-
-		// calculate nodal normal tractions
-		int neln = el.Nodes();
-
-		// get the element stiffness matrix
-		ke.SetNodes(el.m_node);
-		int ndof_a = dofPerNode_a * neln;
-		int ndof_b = dofPerNode_b * neln;
-		ke.resize(ndof_a, ndof_b);
-
-		// calculate element stiffness
-		int nint = el.GaussPoints();
-
-		// gauss weights
-		double* w = el.GaussWeights();
-
-		// repeat over integration points
-		ke.zero();
-		for (int n = 0; n<nint; ++n)
+		if (el.isActive())
 		{
-			FEMaterialPoint& pt = *el.GetMaterialPoint(n);
+			// calculate nodal normal tractions
+			int neln = el.Nodes();
 
-			// set the shape function values
-			pt.m_shape = el.H(n);
+			// get the element stiffness matrix
+			ke.SetNodes(el.m_node);
+			int ndof_a = dofPerNode_a * neln;
+			int ndof_b = dofPerNode_b * neln;
+			ke.resize(ndof_a, ndof_b);
 
-			// calculate stiffness component
-			for (int i = 0; i<neln; ++i)
-				for (int j = 0; j<neln; ++j)
-				{
-					// evaluate integrand
-					kab.zero();
-					f(pt, i, j, kab);
-					ke.adds(dofPerNode_a * i, dofPerNode_b * j, kab, w[n]);
-				}
+			// calculate element stiffness
+			int nint = el.GaussPoints();
+
+			// gauss weights
+			double* w = el.GaussWeights();
+
+			// repeat over integration points
+			ke.zero();
+			for (int n = 0; n < nint; ++n)
+			{
+				FEMaterialPoint& pt = *el.GetMaterialPoint(n);
+
+				// set the shape function values
+				pt.m_shape = el.H(n);
+
+				// calculate stiffness component
+				for (int i = 0; i < neln; ++i)
+					for (int j = 0; j < neln; ++j)
+					{
+						// evaluate integrand
+						kab.zero();
+						f(pt, i, j, kab);
+						ke.adds(dofPerNode_a * i, dofPerNode_b * j, kab, w[n]);
+					}
+			}
+
+			// get the element's LM vector
+			std::vector<int>& lma = ke.RowIndices();
+			std::vector<int>& lmb = ke.ColumnsIndices();
+			lma.assign(ndof_a, -1);
+			lmb.assign(ndof_b, -1);
+			for (int j = 0; j < neln; ++j)
+			{
+				FENode& node = mesh.Node(el.m_node[j]);
+				std::vector<int>& ID = node.m_ID;
+
+				for (int k = 0; k < dofPerNode_a; ++k)
+					lma[dofPerNode_a * j + k] = ID[dofList_a[k]];
+
+				for (int k = 0; k < dofPerNode_b; ++k)
+					lmb[dofPerNode_b * j + k] = ID[dofList_b[k]];
+			}
+
+			// assemble element matrix in global stiffness matrix
+			LS.Assemble(ke);
 		}
-
-		// get the element's LM vector
-		std::vector<int>& lma = ke.RowIndices();
-		std::vector<int>& lmb = ke.ColumnsIndices();
-		lma.assign(ndof_a, -1);
-		lmb.assign(ndof_b, -1);
-		for (int j = 0; j < neln; ++j)
-		{
-			FENode& node = mesh.Node(el.m_node[j]);
-			std::vector<int>& ID = node.m_ID;
-
-			for (int k = 0; k < dofPerNode_a; ++k)
-				lma[dofPerNode_a*j + k] = ID[dofList_a[k]];
-
-			for (int k = 0; k < dofPerNode_b; ++k)
-				lmb[dofPerNode_b*j + k] = ID[dofList_b[k]];
-		}
-
-		// assemble element matrix in global stiffness matrix
-		LS.Assemble(ke);
 	}
+	} // omp parallel
 }

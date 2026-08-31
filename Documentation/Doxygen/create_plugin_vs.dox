@@ -2,32 +2,62 @@
 \page create_plugin_vs Creating a plugin project with Visual Studio
 
 \section vs_sec1_1 Creating the Visual Studio Project
-As of FEBio 3.4, Visual Studio 2019 is the recommended IDE for developing plugins on Windows. Since VS2019 is fully compatible with VS2017, you should be able to run plugins developed with VS2017 with FEBio 3.4 as well. 
+As of FEBio 4, Visual Studio 2022 is the recommended IDE for developing plugins on Windows, however VS2019 should work as well. 
 
-To create a plugin for FEBio in Visual Studio, you need to create a new dll project. To do this, open Visual Studio and select File->New->Project from the menu. 
+To create a plugin for FEBio in Visual Studio, you need to create a new dll project. To do this, open Visual Studio and select the Dynamic-Link Library (DLL) template from the list. Then, click Next.
 
 \image html create_plugin_with_vs_step_1.png
 
-Select the Win32 Project, give it a name and select OK. This will start the Win32 Application Wizard. The first window of the wizard shows the current project settings. 
-Select the Next button to customize the settings. 
+In the next page of the wizard, give the new project a name and a location and click Create. A new dll project will be created and VS will load the new project. 
 
-\image html create_plugin_with_vs_step_2.png
+Note that VS already added some files to the project:
+\li <b>framework.h</b> This includes Windows related header files. 
+\li <b>pch.h</b> This is the header file that generates the precompiled header file. 
+\li <b>pch.cpp</b> This file will be compiled into the precompiled header file 
+\li <b>dllmain.cpp</b> Starting point for the dll 
 
-In the Application Settings window select DLL for the Application type. Uncheck the "Security Development LifeCycle (SDL)" option. Then press Finish to create the new project.
-
-\image html create_plugin_with_vs_step_3.png
+In principle, none of these files are necessary for building an FEBio plugin. If you prefer to start from an empty project, feel free to delete all these files. (If you remove them, make sure to also delete them from the file system.) Deleting the pch.h and pch.cpp does require to turn off the precompiled header file feature in VS, as described below. 
 
 \section vs_sec_2 Configuring the project
 
 Next, we'll need to tell Visual Studio where to find the FEBio header (.h) and library (.lib) files. To do this, right-click on the project name in the Solution Explorer and select Properties from the popup menu.
-Locate the VC++ Directories in the Configuration Properties. In the Include Directories, add the path to the include files (e.g. "C:\Program Files\FEBio2\sdk\include"). To do this, select the "Include Directories" property and click the button on the right of the text edit field. Select "Edit..," from the popup menu. In the dialog box that pops up, the FEBio include folder can be added. Close OK when done. Then,
-add the path to the FEBio library files to the "Library Directories field" (e.g. "C:\Program Files\FEBio3\sdk\lib\"). When done, press the OK button.
+In the Property Pages window, nagivate to <b>Configuration Properties \ C/C++ \ General</b>. Locate the <b>Additional Include Directories</b> property and add the path to the include files (e.g. "C:\Program Files\FEBioStudio2\sdk\include"). To do this, select the "Include Directories" property and click the button on the right of the text edit field. Select "Edit..," from the popup menu. In the dialog box that pops up, the FEBio include folder can be added. Close OK when done. 
 
-It is also necessary to define the WIN32 preprocessor macro. This can be set in the Properties dialog box under the Configuration Properties\C/C++\Preprocessor. Then add WIN32 to the Preprocessor definitions. 
+Next, navigate to <b>Configuration Properties \ Linker \ General</b>, and add the path to the FEBio library files to the <b>Additional Library Directories</b> (e.g. "C:\Program Files\FEBioStudio2\sdk\lib").
 
-Note that the previous steps need to be done for both the Debug and Release configurations separately. Also make sure to link to the FEBio debug libraries when building the Debug configuration of your plugin, and similarly link to the FEBui release libraries when building the Release configuration. Using the wrong libraries may lead to build or runtime errors. Keep in mind that using the debug libraries may result in poor performance. This is to be expected. The debug libraries should only be used for initial testing and debugging. The release libraries should be used for the actual simulations. 
+Then, under the <b>Configuration Properties \ Linker \ Input</b>, add the febio libraries that you will need to the <b>Additional dependencies</b> property. Do not remove anything that is already there. Instead, click on the property's value, click on the dropdown button on the right side, and select the edit option from the dropdown menu. In the next dialog box that appears, add the febio libraries that you will need to link to. Which libraries you'll need to add, depends on the type of plugin. For example, if your developing a material plugin that is used in the solid module, you'll need to link to <i>fecore.lib</i> and <i>febiomech.lib</i>. Another thing to do is look at the header files that you are including and notice the libraries where they are located. For instance, if you are including <c>"FEBioMech\FEElasticMaterial.h"</c>, then you will need to link to <i>febiomech.lib</i>. 
+
+It is also necessary to define the <b>WIN32</b> and <b>FECORE_DLL</b> preprocessor macros. This can be set in the Properties dialog box by navigating to <b>Configuration Properties \ C/C++ \ Preprocessor</b>. Then add <b>WIN32</b> and <b>FECORE_DLL</b> to the <b>Preprocessor definitions</b>. Note that, as with most settings in VS, entries are separated by semicolons. 
+
+Note that the previous steps need to be done for both the Debug and Release configurations separately. Also make sure to link to the FEBio debug libraries when building the Debug configuration of your plugin, and similarly link to the FEBio release libraries when building the Release configuration. Using the wrong libraries may lead to build or runtime errors. Keep in mind that using the debug libraries may result in poor performance. This is to be expected. The debug libraries should only be used for initial testing and debugging. The release libraries should be used for the actual simulations. 
 
 \image html create_plugin_with_vs_step_4.png
 
+If you deleted the pch.h and pch.cpp files that were automatically added to the project by VS, you also need to turn off the precompiled header file feature. This can be done as follows. Open the Properties dialog, and then navigate to <b>Configuration Properties \ C/C++ \ Precompiled Header</b>. Then, set the <b>Precompiled header</b> property to <b>Not using precompiled headers</b>. Make sure to change this for both the Debug and Release configurations. 
+
 Now you are ready to write your plugin. 
+
+\section vs_sec_3 Building the project
+
+After you've written the plugin code, you'll need to build it. This will produce the final dynamic link library (dll) that you need to import in FEBio. 
+
+Before building the plugin, first check the configuration that is currently selected. Choose either Debug or Release depending on whether you are developing a version for testing (debug) or actual simulation (release). Remember that it is important that you selected the correct FEBio link libraries depending on the configuration. 
+
+Once you are ready to build the plugin, use the menu <b>Build \ Build Solution</b> to build the plugin. If all went well, Visual Studio should produce a dll file. You can now use this plugin in FEBio, as described in the section \ref using_plugins. (However, also see next section.)
+
+The most likely errors you may see are "unresolved external symbols". This means that the linker was not able to locate some of the functions that you are calling in your plugin (either directly, or indirectly via another febio library). The usual solution is to find out the library these functions are located in and add it to the <b>Additional Dependencies</b> linker input option, as described above. 
+
+\section vs_sec_4 Testing the plugin
+
+For initial testing and debugging, it might be more convenient to run the plugin code from within Visual Studio. To do this, open the Properties dialog box again for the project. Select the <b>Configuration Properties \ Debugging</b> settings. Then, change the following settings. 
+
+\li <b>Command</b> : Specify the path to the FEBio executable here. (e.g. C:\\Program Files\\FEBioStudio2\\sdk\\bin\\Debug\\febio4.exe). 
+\li <b>Command Arguments</b> : Set this to <b>-import "$(TargetPath)"</b> (if you do this, you do not need to specify the plugin in the FEBio configuration file.)
+\li <b>Working Directory</b> : Set this to the location of your test febio input files. 
+
+Press OK and close the dialog box. 
+
+Now, use the menu <b>Debug \ Start Debugging</b> to start FEBio. FEBio should start, load the plugin, and display a message that it was able to load the plugin or not. Then, the FEBio prompt appears and you can run a test file by entering the command (assume the input file is called <i>test.feb</i>) <c>run test.feb</c> [ENTER]. 
+Alternatively, you can also add the file name to the <b>Command Arguments</b> property above. (e.g. <b>-import "$(TargetPath)" -i test.feb</b>). In that case, FEBio will start, load the plugin and immediately run the specified input file. It will also exit immediately once the model completes. Thus, for small problems, it is possible that the whole process completes in a fraction of a second, and it may appear as nothing happened. You can always double-check the output files to check if FEBio ran correctly. 
+
 */

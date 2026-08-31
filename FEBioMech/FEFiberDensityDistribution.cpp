@@ -36,20 +36,21 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // define the ellipsoidal fiber density distributionmaterial parameters
 BEGIN_FECORE_CLASS(FEEllipsoidalFiberDensityDistribution, FEFiberDensityDistribution)
-	ADD_PARAMETER(m_spa, "spa" );
+	ADD_PARAMETER(m_spa, 3, FE_RANGE_GREATER_OR_EQUAL(0.0), "spa");
 END_FECORE_CLASS();
 
 FEEllipsoidalFiberDensityDistribution::FEEllipsoidalFiberDensityDistribution(FEModel* pfem) : FEFiberDensityDistribution(pfem)
 { 
-    m_spa = vec3d(0);
+	m_spa[0] = 1;
+	m_spa[1] = 1;
+	m_spa[2] = 1;
 }
 
 double FEEllipsoidalFiberDensityDistribution::FiberDensity(FEMaterialPoint& mp, const vec3d& n0)
 {
-    vec3d spa = m_spa(mp);
-	double a0 = spa.x;
-	double a1 = spa.y;
-	double a2 = spa.z;
+	double a0 = m_spa[0](mp);
+	double a1 = m_spa[1](mp);
+	double a2 = m_spa[2](mp);
 
     double R = 1.0/sqrt(SQR(n0.x/a0)+SQR(n0.y/a1)+SQR(n0.z/a2));
     return R;
@@ -57,8 +58,8 @@ double FEEllipsoidalFiberDensityDistribution::FiberDensity(FEMaterialPoint& mp, 
 
 //-----------------------------------------------------------------------------
 // define the 3d von Mises fiber density distribution material parameters
-BEGIN_FECORE_CLASS(FEVonMises3DFiberDensityDistribution, FEMaterial)
-	ADD_PARAMETER(m_b, FE_RANGE_GREATER_OR_EQUAL(0.0), "b" );
+BEGIN_FECORE_CLASS(FEVonMises3DFiberDensityDistribution, FEFiberDensityDistribution)
+	ADD_PARAMETER(m_b, FE_RANGE_GREATER_OR_EQUAL(0.0), "b" )->setLongName("concentration");
 END_FECORE_CLASS();
 
 double FEVonMises3DFiberDensityDistribution::FiberDensity(FEMaterialPoint& mp, const vec3d& n0)
@@ -72,7 +73,7 @@ double FEVonMises3DFiberDensityDistribution::FiberDensity(FEMaterialPoint& mp, c
 
 //-----------------------------------------------------------------------------
 // define the 3d 2-fiber family axisymmetric von Mises fiber density distribution material parameters
-BEGIN_FECORE_CLASS(FEVonMises3DTwoFDDAxisymmetric, FEMaterial)
+BEGIN_FECORE_CLASS(FEVonMises3DTwoFDDAxisymmetric, FEFiberDensityDistribution)
 	ADD_PARAMETER(m_b, FE_RANGE_GREATER_OR_EQUAL(0.0), "b" );
 	ADD_PARAMETER(m_c, FE_RANGE_CLOSED(0, 1), "cosg" );
 END_FECORE_CLASS();
@@ -100,7 +101,7 @@ double FEVonMises3DTwoFDDAxisymmetric::FiberDensity(FEMaterialPoint& mp, const v
 
 //-----------------------------------------------------------------------------
 // define the ellipsoidal fiber density distributionmaterial parameters
-BEGIN_FECORE_CLASS(FEEllipticalFiberDensityDistribution, FEMaterial)
+BEGIN_FECORE_CLASS(FEEllipticalFiberDensityDistribution, FEFiberDensityDistribution)
 	ADD_PARAMETER(m_spa[0], FE_RANGE_GREATER_OR_EQUAL(0.0), "spa1" );
 	ADD_PARAMETER(m_spa[1], FE_RANGE_GREATER_OR_EQUAL(0.0), "spa2" );
 END_FECORE_CLASS();
@@ -117,8 +118,8 @@ double FEEllipticalFiberDensityDistribution::FiberDensity(FEMaterialPoint& mp, c
 
 //-----------------------------------------------------------------------------
 // define the 2d von Mises fiber density distribution material parameters
-BEGIN_FECORE_CLASS(FEVonMises2DFiberDensityDistribution, FEMaterial)
-	ADD_PARAMETER(m_b, FE_RANGE_GREATER_OR_EQUAL(0.0), "b" );
+BEGIN_FECORE_CLASS(FEVonMises2DFiberDensityDistribution, FEFiberDensityDistribution)
+	ADD_PARAMETER(m_b, FE_RANGE_GREATER_OR_EQUAL(0.0), "b" )->setLongName("concentration");
 END_FECORE_CLASS();
 
 double FEVonMises2DFiberDensityDistribution::FiberDensity(FEMaterialPoint& mp, const vec3d& n0)

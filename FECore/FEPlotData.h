@@ -36,16 +36,19 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // Region types
 enum Region_Type {
+	FE_REGION_GLOBAL,
 	FE_REGION_NODE,
 	FE_REGION_DOMAIN,
-	FE_REGION_SURFACE
+	FE_REGION_SURFACE,
+	FE_REGION_EDGE
 };
 
 //-----------------------------------------------------------------------------
 // forward declarations
 class FEModel;
-class FENode;
 class FEMesh;
+class FENode;
+class FEEdge;
 class FESurface;
 class FEDomain;
 class FESolidDomain;
@@ -61,7 +64,7 @@ class FEElement;
 //!
 class FECORE_API FEPlotData : public FECoreBase
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FEPLOTDATA_ID)
 
 public:
 	FEPlotData(FEModel* fem);
@@ -87,8 +90,8 @@ public:
 	void SetItemList(vector<int>& item) { m_item = item; }
 
 	vector<int> GetItemList() { return m_item; }
-    
-    void SetDomainName(const char* szdom);
+
+	void SetDomainName(const char* szdom);
 	const char* GetDomainName() { return m_szdom;  }
 
 protected:
@@ -97,9 +100,11 @@ protected:
 	void SetStorageFormat(Storage_Fmt sf) { m_sfmt = sf; }
 
 public: // override one of these functions depending on the Region_Type
+	virtual bool Save(FEDataStream& a) { return false; }					// for FE_REGION_GLOBAL
 	virtual bool Save(FEMesh&    m, FEDataStream& a) { return false; }		// for FE_REGION_NODE
 	virtual bool Save(FEDomain&  D, FEDataStream& a) { return false; }		// for FE_REGION_DOMAIN
 	virtual bool Save(FESurface& S, FEDataStream& a) { return false; }		// for FE_REGION_SURFACE
+	virtual bool Save(FEEdge&    E, FEDataStream& a) { return false; }		// for FE_REGION_EDGE
 
 public:
 	// will be called before Save
@@ -112,15 +117,30 @@ public: // used by array variables
 	void SetArrayNames(vector<string>& s) { m_arrayNames = s; }
 	vector<string>& GetArrayNames() { return m_arrayNames; }
 
+public:
+	void SetUnits(const char* sz) { m_szunit = sz; }
+	const char* GetUnits() const { return m_szunit; }
+
 private:
 	Region_Type		m_nregion;		//!< region type
 	Var_Type		m_ntype;		//!< data type
 	Storage_Fmt		m_sfmt;			//!< data storage format
 	vector<int>		m_item;			//!< Data will only be stored for the item's in this list
     char			m_szdom[64];	//!< Data will only be stored for the domain with this name
-
+	const char*		m_szunit;
 	int				m_arraySize;	//!< size of arrays (used by arrays)
 	vector<string>	m_arrayNames;	//!< optional names of array components (used by arrays)
+};
+
+//-----------------------------------------------------------------------------
+//! Base class for global data. Data that wish to store data that is not directly
+//! evaluated on a part of the mesh should inherit from this class. 
+class FECORE_API FEPlotGlobalData : public FEPlotData
+{
+	FECORE_BASE_CLASS(FEPlotGlobalData)
+
+public:
+	FEPlotGlobalData(FEModel* fem, Var_Type t) : FEPlotData(fem, FE_REGION_GLOBAL, t, FMT_ITEM) {}
 };
 
 //-----------------------------------------------------------------------------
@@ -128,6 +148,8 @@ private:
 //! associated with each node of the mesh, will use this base class.
 class FECORE_API FEPlotNodeData : public FEPlotData
 {
+	FECORE_BASE_CLASS(FEPlotNodeData)
+
 public:
 	FEPlotNodeData(FEModel* fem, Var_Type t, Storage_Fmt s) : FEPlotData(fem, FE_REGION_NODE, t, s) {}
 };
@@ -137,6 +159,8 @@ public:
 //! associated with each element or node of a domain, will use this base class.
 class FECORE_API FEPlotDomainData : public FEPlotData
 {
+	FECORE_BASE_CLASS(FEPlotDomainData)
+
 public:
 	FEPlotDomainData(FEModel* fem, Var_Type t, Storage_Fmt s) : FEPlotData(fem, FE_REGION_DOMAIN, t, s) {}
 };
@@ -146,6 +170,49 @@ public:
 //! associated with each node or facet of a surface, will use this base class.
 class FECORE_API FEPlotSurfaceData : public FEPlotData
 {
+	FECORE_BASE_CLASS(FEPlotSurfaceData)
+
 public:
 	FEPlotSurfaceData(FEModel* fem, Var_Type t, Storage_Fmt s) : FEPlotData(fem, FE_REGION_SURFACE, t, s) {}
+};
+
+//! This is the base class for edge data. Classes that wish to store data
+//! associated with each node or facet of a FEEdge, will use this base class.
+class FECORE_API FEPlotEdgeData : public FEPlotData
+{
+	FECORE_BASE_CLASS(FEPlotEdgeData)
+
+public:
+	FEPlotEdgeData(FEModel* fem, Var_Type t, Storage_Fmt s) : FEPlotData(fem, FE_REGION_EDGE, t, s) {}
+};
+
+// helper class for parsing the type string of plot fields
+class FECORE_API FEPlotFieldDescriptor
+{
+private:
+	enum FilterType {
+		NO_FILTER,
+		NUMBER_FILTER,
+		STRING_FILTER
+	};
+
+public:
+	FEPlotFieldDescriptor(const std::string& typeString);
+
+	bool isValid() const { return m_valid; }
+
+	bool HasFilter() const { return (m_filterType != NO_FILTER); }
+	bool IsNumberFilter() const { return (m_filterType == NUMBER_FILTER); }
+	bool IsStringFilter() const { return (m_filterType == STRING_FILTER); }
+
+public:
+	string	fieldName;
+	string	alias;
+
+	int		numFilter = -1;
+	string	strFilter;
+
+private:
+	FilterType m_filterType = NO_FILTER;
+	bool m_valid = false;
 };

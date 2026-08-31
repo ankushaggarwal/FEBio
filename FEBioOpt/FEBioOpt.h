@@ -23,10 +23,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
-
-
-
 #pragma once
+#include "febioopt_api.h"
 
 //-----------------------------------------------------------------------------
 //! The FEBioOpt module 
@@ -35,6 +33,12 @@ SOFTWARE.*/
 //!
 namespace FEBioOpt {
 
-void InitModule();
+	FEBIOOPT_API void InitModule();
 
+	// wrapper function for some levmar calls.
+	// This is only used in FEBio Studio, but don't want to link there with levmar.
+	FEBIOOPT_API int optimize(
+		void (*func)(double* p, double* hx, int m, int n, void* adata),
+		double* p, double* x, int m, int n, double* lb, double* ub, double* dscl,
+		int itmax, double* opts, double* info, double* work, double* covar, void* adata);
 }

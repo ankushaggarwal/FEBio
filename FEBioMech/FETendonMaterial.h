@@ -40,16 +40,16 @@ public:
 
 public:
 	// transverse constants
-	double	m_G1;	//!< along-fiber shear modulus
-	double	m_G2;	//!< cross-fiber shear modulus
+	FEParamDouble	m_G1;	//!< along-fiber shear modulus
+	FEParamDouble	m_G2;	//!< cross-fiber shear modulus
 
 	// along fiber constants
-	double	m_L1;	//!< tendon fiber constant L1
-	double	m_L2;	//!< tendon fiber constant L2
+	FEParamDouble	m_L1;	//!< tendon fiber constant L1
+	FEParamDouble	m_L2;	//!< tendon fiber constant L2
 
-	double	m_lam1;	//!< max exponential fiber stretch
+	FEParamDouble	m_lam1;	//!< max exponential fiber stretch
 
-	FEParamVec3		m_fiber;
+	FEVec3dValuator*	m_fiber;
 	
 public:
 	//! calculate deviatoric stress at material point

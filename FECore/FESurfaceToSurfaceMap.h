@@ -35,7 +35,7 @@ SOFTWARE.*/
 class FEModel;
 class FESurface;
 
-class FESurfaceToSurfaceMap : public FEDataGenerator
+class FESurfaceToSurfaceMap : public FEElemDataGenerator
 {
 public:
 	FESurfaceToSurfaceMap(FEModel* fem);
@@ -43,14 +43,13 @@ public:
 
 	bool Init() override;
 
-	void value(const vec3d& x, double& data) override;
+	FEDataMap* Generate() override;
 
 private:
-	std::string		m_surfName1;
-	std::string		m_surfName2;
-	FEFunction1D*	m_func;
-	
+	double value(const vec3d& x);
+
 private:
+	FEFunction1D*	m_func;
 	FESurface*	m_surf1;
 	FESurface*	m_surf2;
 	FEClosestPointProjection*	m_ccp1;

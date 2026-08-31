@@ -56,10 +56,6 @@ public:
 	void Serialize(DumpStream& ar) override;
 
 public:
-	//! Calculates concentrated nodal forces (overridden from FESolidSolver2)
-	//! (This function is called from FESolidSolver2::PrepStep)
-	void NodalLoads(FEGlobalVector& R, const FETimeInfo& tp) override;
-
 	//! Calculates residual (overridden from FEBiphasicSolver)
 	bool Residual(vector<double>& R) override;
 
@@ -75,9 +71,6 @@ public:
 protected:
 	void GetConcentrationData(vector<double>& ci, vector<double>& ui, const int sol);
 
-public:	// Parameters
-	double	m_Ctol;			//!< concentration tolerance
-
 public:
 	// solute data
 	vector< vector<double> >	m_ci;	//!< concentration increment vector
@@ -86,6 +79,4 @@ public:
 	FEDofList	m_dofC;	//!< concentration dof
     FEDofList	m_dofD;	//!< shell concentration dof
 
-	// declare the parameter list
-	DECLARE_FECORE_CLASS();
 };

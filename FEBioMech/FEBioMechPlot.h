@@ -29,10 +29,58 @@ SOFTWARE.*/
 #pragma once
 #include <FECore/FEPlotData.h>
 #include <FECore/FEElement.h>
+#include <FECore/units.h>
 
 //=============================================================================
 //                            N O D E   D A T A
 //=============================================================================
+
+//-----------------------------------------------------------------------------
+//! Nodal displacements
+//!
+class FEPlotNodeDisplacement : public FEPlotNodeData
+{
+public:
+	FEPlotNodeDisplacement(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_LENGTH); }
+	bool Save(FEMesh& m, FEDataStream& a);
+};
+
+//! Nodal rotations
+class FEPlotNodeRotation : public FEPlotNodeData
+{
+public:
+	FEPlotNodeRotation(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_RADIAN); }
+	bool Save(FEMesh& m, FEDataStream& a);
+};
+
+
+//! Nodal shell displacements
+class FEPlotNodeShellDisplacement : public FEPlotNodeData
+{
+public:
+    FEPlotNodeShellDisplacement(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_LENGTH); }
+    bool Save(FEMesh& m, FEDataStream& a);
+};
+
+//! Nodal incremental displacement
+class FEPlotNodeIncrementalDisplacement : public FEPlotNodeData
+{
+public:
+	FEPlotNodeIncrementalDisplacement(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_LENGTH); }
+	bool Save(FEMesh& m, FEDataStream& a);
+
+private:
+	std::vector<vec3d> m_rp;
+};
+
+//-----------------------------------------------------------------------------
+//! Shell directors
+class FEPlotNodalShellDirector : public FEPlotNodeData
+{
+public:
+    FEPlotNodalShellDirector(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_LENGTH); }
+    bool Save(FEMesh& m, FEDataStream& a);
+};
 
 //-----------------------------------------------------------------------------
 //! Nodal velocities
@@ -40,7 +88,7 @@ SOFTWARE.*/
 class FEPlotNodeVelocity : public FEPlotNodeData
 {
 public:
-	FEPlotNodeVelocity(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE){}
+	FEPlotNodeVelocity(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_VELOCITY); }
 	bool Save(FEMesh& m, FEDataStream& a);
 };
 
@@ -50,7 +98,7 @@ public:
 class FEPlotNodeAcceleration : public FEPlotNodeData
 {
 public:
-	FEPlotNodeAcceleration(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE){}
+	FEPlotNodeAcceleration(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_ACCELERATION); }
 	bool Save(FEMesh& m, FEDataStream& a);
 };
 
@@ -59,7 +107,7 @@ public:
 class FEPlotNodeReactionForces : public FEPlotNodeData
 {
 public:
-	FEPlotNodeReactionForces(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE){}
+	FEPlotNodeReactionForces(FEModel* pfem) : FEPlotNodeData(pfem, PLT_VEC3F, FMT_NODE) { SetUnits(UNIT_FORCE); }
 	bool Save(FEMesh& m, FEDataStream& a);
 };
 
@@ -73,8 +121,11 @@ public:
 class FEPlotContactGap : public FEPlotSurfaceData
 {
 public:
-    FEPlotContactGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FESurface& surf, FEDataStream& a);
+	FEPlotContactGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_ITEM) { SetUnits(UNIT_LENGTH); }
+	bool SetFilter(const char* sz) override;
+	bool Save(FESurface& surf, FEDataStream& a) override;
+private:
+	std::string m_interfaceName;
 };
 
 //-----------------------------------------------------------------------------
@@ -83,7 +134,7 @@ public:
 class FEPlotVectorGap : public FEPlotSurfaceData
 {
 public:
-    FEPlotVectorGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_ITEM){}
+    FEPlotVectorGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_LENGTH); }
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -93,8 +144,11 @@ public:
 class FEPlotContactPressure : public FEPlotSurfaceData
 {
 public:
-    FEPlotContactPressure(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FESurface& surf, FEDataStream& a);
+	FEPlotContactPressure(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
+	bool SetFilter(const char* sz) override;
+	bool Save(FESurface& surf, FEDataStream& a) override;
+private:
+	std::string m_interfaceName;
 };
 
 //-----------------------------------------------------------------------------
@@ -103,8 +157,11 @@ public:
 class FEPlotContactTraction : public FEPlotSurfaceData
 {
 public:
-    FEPlotContactTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_ITEM){}
-    bool Save(FESurface& surf, FEDataStream& a);
+    FEPlotContactTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
+	bool SetFilter(const char* sz) override;
+	bool Save(FESurface& surf, FEDataStream& a) override;
+private:
+	std::string m_interfaceName;
 };
 
 //-----------------------------------------------------------------------------
@@ -113,7 +170,7 @@ public:
 class FEPlotNodalContactGap : public FEPlotSurfaceData
 {
 public:
-	FEPlotNodalContactGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_MULT){}
+	FEPlotNodalContactGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_MULT){ SetUnits(UNIT_LENGTH); }
 	bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -123,7 +180,7 @@ public:
 class FEPlotNodalVectorGap : public FEPlotSurfaceData
 {
 public:
-    FEPlotNodalVectorGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_MULT){}
+    FEPlotNodalVectorGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_MULT){ SetUnits(UNIT_LENGTH); }
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -133,7 +190,7 @@ public:
 class FEPlotNodalContactPressure : public FEPlotSurfaceData
 {
 public:
-    FEPlotNodalContactPressure(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_MULT){}
+    FEPlotNodalContactPressure(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_MULT){ SetUnits(UNIT_PRESSURE); }
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -143,7 +200,7 @@ public:
 class FEPlotNodalContactTraction : public FEPlotSurfaceData
 {
 public:
-	FEPlotNodalContactTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_MULT){}
+	FEPlotNodalContactTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_MULT){ SetUnits(UNIT_PRESSURE); }
 	bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -153,7 +210,7 @@ public:
 class FEPlotSurfaceTraction : public FEPlotSurfaceData
 {
 public:
-    FEPlotSurfaceTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_ITEM){}
+    FEPlotSurfaceTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -163,7 +220,7 @@ public:
 class FEPlotNodalSurfaceTraction : public FEPlotSurfaceData
 {
 public:
-    FEPlotNodalSurfaceTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_MULT){}
+    FEPlotNodalSurfaceTraction(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_MULT){ SetUnits(UNIT_PRESSURE); }
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -183,7 +240,7 @@ public:
 class FEPlotContactForce : public FEPlotSurfaceData
 {
 public:
-	FEPlotContactForce(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_REGION){}
+	FEPlotContactForce(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_REGION){ SetUnits(UNIT_FORCE); }
 	bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -193,7 +250,7 @@ public:
 class FEPlotContactArea : public FEPlotSurfaceData
 {
 public:
-	FEPlotContactArea(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){}
+	FEPlotContactArea(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){ SetUnits(UNIT_AREA); }
 	bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -220,7 +277,7 @@ public:
 class FEPlotMortarContactGap : public FEPlotSurfaceData
 {
 public:
-	FEPlotMortarContactGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_NODE){}
+	FEPlotMortarContactGap(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_NODE){ SetUnits(UNIT_LENGTH); }
 	bool Save(FESurface& S, FEDataStream& a);
 };
 
@@ -235,7 +292,24 @@ private:
     vector<vec3d>       m_area;
     
 public:
-    FEPlotEnclosedVolume(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){ m_binit = true; }
+    FEPlotEnclosedVolume(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){ m_binit = true; SetUnits(UNIT_VOLUME);
+	}
+    bool Save(FESurface& surf, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Enclosed volume change
+//!
+class FEPlotEnclosedVolumeChange : public FEPlotSurfaceData
+{
+private:
+    bool                m_binit;
+    vector<FEElement*>  m_elem;
+    vector<vec3d>       m_area;
+    
+public:
+    FEPlotEnclosedVolumeChange(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){ m_binit = true; SetUnits(UNIT_VOLUME);
+    }
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -251,7 +325,7 @@ private:
     vector<vec3d>       m_area;
     
 public:
-    FEPlotSurfaceArea(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){ m_binit = true; }
+    FEPlotSurfaceArea(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_REGION){ m_binit = true; SetUnits(UNIT_AREA);	}
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
@@ -267,10 +341,9 @@ private:
 	vector<vec3d>       m_area;
 
 public:
-	FEPlotFacetArea(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_ITEM) { m_binit = true; }
+	FEPlotFacetArea(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_FLOAT, FMT_ITEM) { m_binit = true; SetUnits(UNIT_AREA);	}
 	bool Save(FESurface& surf, FEDataStream& a);
 };
-
 
 //-----------------------------------------------------------------------------
 //! Scalar surface load
@@ -282,6 +355,25 @@ public:
     bool Save(FESurface& surf, FEDataStream& a);
 };
 
+//-----------------------------------------------------------------------------
+//! Total reaction force on surface
+class FEPlotNetSurfaceReactionForce : public FEPlotSurfaceData
+{
+public:
+	FEPlotNetSurfaceReactionForce(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_REGION) {}
+	bool Save(FESurface& surf, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Total reaction moment on surface
+class FEPlotNetSurfaceReactionMoment : public FEPlotSurfaceData
+{
+public:
+	FEPlotNetSurfaceReactionMoment(FEModel* pfem) : FEPlotSurfaceData(pfem, PLT_VEC3F, FMT_REGION) {}
+	bool Save(FESurface& surf, FEDataStream& a);
+};
+
+
 //=============================================================================
 //							D O M A I N   D A T A
 //=============================================================================
@@ -290,7 +382,7 @@ public:
 class FEPlotElementVelocity : public FEPlotDomainData
 {
 public:
-    FEPlotElementVelocity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){}
+    FEPlotElementVelocity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_VELOCITY); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -299,7 +391,7 @@ public:
 class FEPlotElementAcceleration : public FEPlotDomainData
 {
 public:
-    FEPlotElementAcceleration(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){}
+    FEPlotElementAcceleration(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_ACCELERATION); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -308,7 +400,7 @@ public:
 class FEPlotElementStress : public FEPlotDomainData
 {
 public:
-	FEPlotElementStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+	FEPlotElementStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -317,7 +409,7 @@ public:
 class FEPlotElementPK2Stress : public FEPlotDomainData
 {
 public:
-	FEPlotElementPK2Stress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM) {}
+	FEPlotElementPK2Stress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -326,7 +418,7 @@ public:
 class FEPlotElementPK1Stress : public FEPlotDomainData
 {
 public:
-	FEPlotElementPK1Stress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3F, FMT_ITEM) {}
+	FEPlotElementPK1Stress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3F, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -340,6 +432,43 @@ public:
 	bool Save(FEDomain& dom, FEDataStream& a) override;
 protected:
 	int		m_comp;
+	int		m_mat;
+};
+
+//-----------------------------------------------------------------------------
+//! Element plastic yield stresses
+class FEPlotElementPlasticYieldStress : public FEPlotDomainData
+{
+public:
+    FEPlotElementPlasticYieldStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Element yield stress based on Drucker shear stress criterion
+class FEPlotElementDruckerShear : public FEPlotDomainData
+{
+public:
+    FEPlotElementDruckerShear(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Element yield stress based on Prager-Drucker criterion
+class FEPlotElementPragerDruckerStress : public FEPlotDomainData
+{
+public:
+    FEPlotElementPragerDruckerStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Element yield stress based on Deshpande-Fleck criterion
+class FEPlotElementDeshpandeFleckStress : public FEPlotDomainData
+{
+public:
+    FEPlotElementDeshpandeFleckStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
 };
 
 //-----------------------------------------------------------------------------
@@ -347,7 +476,7 @@ protected:
 class FEPlotElementUncoupledPressure : public FEPlotDomainData
 {
 public:
-    FEPlotElementUncoupledPressure(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+    FEPlotElementUncoupledPressure(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -356,7 +485,7 @@ public:
 class FEPlotElementsnorm : public FEPlotDomainData
 {
 public:
-	FEPlotElementsnorm(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+	FEPlotElementsnorm(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -388,6 +517,45 @@ public:
 };
 
 //-----------------------------------------------------------------------------
+//! Strain energy density in mixture components
+class FEPlotMixtureStrainEnergyDensity : public FEPlotDomainData
+{
+public:
+    FEPlotMixtureStrainEnergyDensity(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
+    int        m_mat;
+};
+
+//-----------------------------------------------------------------------------
+//! Deviatoric strain energy density in mixture components
+class FEPlotMixtureDevStrainEnergyDensity : public FEPlotDomainData
+{
+public:
+    FEPlotMixtureDevStrainEnergyDensity(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
+    int        m_mat;
+};
+
+//-----------------------------------------------------------------------------
+//! Specific strain energy in mixture components
+class FEPlotMixtureSpecificStrainEnergy : public FEPlotDomainData
+{
+public:
+    FEPlotMixtureSpecificStrainEnergy(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
+    int        m_mat;
+};
+
+//-----------------------------------------------------------------------------
 //! Kinetic energy density
 class FEPlotKineticEnergyDensity : public FEPlotDomainData
 {
@@ -401,7 +569,7 @@ public:
 class FEPlotDensity : public FEPlotDomainData
 {
 public:
-	FEPlotDensity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+	FEPlotDensity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){ SetUnits(UNIT_DENSITY); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -410,7 +578,7 @@ public:
 class FEPlotElementStrainEnergy : public FEPlotDomainData
 {
 public:
-    FEPlotElementStrainEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+    FEPlotElementStrainEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){ SetUnits(UNIT_ENERGY); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -419,7 +587,7 @@ public:
 class FEPlotElementKineticEnergy : public FEPlotDomainData
 {
 public:
-    FEPlotElementKineticEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+    FEPlotElementKineticEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){ SetUnits(UNIT_ENERGY); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -428,7 +596,7 @@ public:
 class FEPlotElementCenterOfMass : public FEPlotDomainData
 {
 public:
-    FEPlotElementCenterOfMass(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){}
+    FEPlotElementCenterOfMass(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_LENGTH); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -482,7 +650,7 @@ public:
 class FEPlotCurrentElementCenterOfMass : public FEPlotDomainData
 {
 public:
-    FEPlotCurrentElementCenterOfMass(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){}
+    FEPlotCurrentElementCenterOfMass(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM){ SetUnits(UNIT_LENGTH); }
     bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -510,6 +678,13 @@ class FEPlotRelativeVolume : public FEPlotDomainData
 {
 public:
 	FEPlotRelativeVolume(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+class FEPlotSPRRelativeVolume : public FEPlotDomainData
+{
+public:
+	FEPlotSPRRelativeVolume(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_NODE) {}
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -574,7 +749,7 @@ private:
 class FEPlotShellThickness : public FEPlotDomainData
 {
 public:
-	FEPlotShellThickness(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_MULT){}
+	FEPlotShellThickness(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_MULT){ SetUnits(UNIT_LENGTH); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -592,8 +767,17 @@ public:
 class FEPlotElementElasticity : public FEPlotDomainData
 {
 public:
-	FEPlotElementElasticity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_TENS4FS, FMT_ITEM){}
+    FEPlotElementElasticity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_TENS4FS, FMT_ITEM) { SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Element elasticity tensor
+class FEPlotElementDevElasticity : public FEPlotDomainData
+{
+public:
+    FEPlotElementDevElasticity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_TENS4FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
 };
 
 //-----------------------------------------------------------------------------
@@ -601,20 +785,11 @@ public:
 class FEPlotDamage : public FEPlotDomainData
 {
 public:
-	FEPlotDamage(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-	bool Save(FEDomain& m, FEDataStream& a);
-};
-
-//-----------------------------------------------------------------------------
-//! Damage reduction factor
-class FEPlotNestedDamage : public FEPlotDomainData
-{
-public:
-    FEPlotNestedDamage(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FEDomain& m, FEDataStream& a);
-    bool SetFilter(int nsol);
+    FEPlotDamage(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+	bool Save(FEDomain& m, FEDataStream& a) override;
 protected:
-    int			m_nmat;
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -622,8 +797,11 @@ protected:
 class FEPlotIntactBondFraction : public FEPlotDomainData
 {
 public:
-    FEPlotIntactBondFraction(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FEDomain& m, FEDataStream& a);
+    FEPlotIntactBondFraction(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& m, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -631,8 +809,11 @@ public:
 class FEPlotFatigueBondFraction : public FEPlotDomainData
 {
 public:
-    FEPlotFatigueBondFraction(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FEDomain& m, FEDataStream& a);
+    FEPlotFatigueBondFraction(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& m, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -640,8 +821,11 @@ public:
 class FEPlotYieldedBondFraction : public FEPlotDomainData
 {
 public:
-    FEPlotYieldedBondFraction(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FEDomain& m, FEDataStream& a);
+    FEPlotYieldedBondFraction(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& m, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -649,8 +833,11 @@ public:
 class FEPlotOctahedralPlasticStrain : public FEPlotDomainData
 {
 public:
-    FEPlotOctahedralPlasticStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FEDomain& m, FEDataStream& a);
+    FEPlotOctahedralPlasticStrain(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& m, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -658,8 +845,11 @@ public:
 class FEPlotReactivePlasticityHeatSupply : public FEPlotDomainData
 {
 public:
-    FEPlotReactivePlasticityHeatSupply(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
-    bool Save(FEDomain& dom, FEDataStream& a);
+    FEPlotReactivePlasticityHeatSupply(FEModel* pfem);
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& m, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -686,7 +876,7 @@ public:
 class FEPlotSPRStresses : public FEPlotDomainData
 {
 public:
-	FEPlotSPRStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_NODE){}
+	FEPlotSPRStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_NODE){ SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -696,7 +886,7 @@ public:
 class FEPlotSPRLinearStresses : public FEPlotDomainData
 {
 public:
-	FEPlotSPRLinearStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_NODE){}
+	FEPlotSPRLinearStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_NODE){ SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -706,7 +896,7 @@ public:
 class FEPlotSPRPrincStresses : public FEPlotDomainData
 {
 public:
-	FEPlotSPRPrincStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FD, FMT_NODE){}
+	FEPlotSPRPrincStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FD, FMT_NODE){ SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -715,7 +905,7 @@ public:
 class FEPlotRigidDisplacement : public FEPlotDomainData
 {
 public:
-	FEPlotRigidDisplacement(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) {}
+	FEPlotRigidDisplacement(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_LENGTH); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -724,7 +914,7 @@ public:
 class FEPlotRigidVelocity : public FEPlotDomainData
 {
 public:
-	FEPlotRigidVelocity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) {}
+	FEPlotRigidVelocity(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_VELOCITY); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -733,7 +923,7 @@ public:
 class FEPlotRigidAcceleration : public FEPlotDomainData
 {
 public:
-	FEPlotRigidAcceleration(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) {}
+	FEPlotRigidAcceleration(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_ACCELERATION); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -769,7 +959,7 @@ public:
 class FEPlotRigidKineticEnergy : public FEPlotDomainData
 {
 public:
-	FEPlotRigidKineticEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_REGION) {}
+	FEPlotRigidKineticEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_REGION) { SetUnits(UNIT_ENERGY); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -796,7 +986,7 @@ public:
 class FEPlotRigidEuler : public FEPlotDomainData
 {
 public:
-	FEPlotRigidEuler(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) {}
+	FEPlotRigidEuler(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_RADIAN); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -815,8 +1005,89 @@ public:
 class FEPlotNodalStresses : public FEPlotDomainData
 {
 public:
-	FEPlotNodalStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){}
+	FEPlotNodalStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){ SetUnits(UNIT_PRESSURE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects stresses from integration points to the nodes
+class FEPlotShellTopStress : public FEPlotDomainData
+{
+public:
+    FEPlotShellTopStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects stresses from integration points to the bottom shell nodes
+class FEPlotShellBottomStress : public FEPlotDomainData
+{
+public:
+    FEPlotShellBottomStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){ SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects stresses from integration points to the nodes
+class FEPlotShellTopNodalStresses : public FEPlotDomainData
+{
+public:
+    FEPlotShellTopNodalStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){ SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects stresses from integration points to the bottom shell nodes
+class FEPlotShellBottomNodalStresses : public FEPlotDomainData
+{
+public:
+    FEPlotShellBottomNodalStresses(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){ SetUnits(UNIT_PRESSURE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects Lagrange strains from integration points to the nodes
+class FEPlotNodalStrains : public FEPlotDomainData
+{
+public:
+    FEPlotNodalStrains(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){ SetUnits(UNIT_NONE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects stresses from integration points to the nodes
+class FEPlotShellTopStrain : public FEPlotDomainData
+{
+public:
+    FEPlotShellTopStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){ SetUnits(UNIT_NONE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects stresses from integration points to the bottom shell nodes
+class FEPlotShellBottomStrain : public FEPlotDomainData
+{
+public:
+    FEPlotShellBottomStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){ SetUnits(UNIT_NONE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects Lagrange strains from integration points to the shell nodes
+class FEPlotShellTopNodalStrains : public FEPlotDomainData
+{
+public:
+    FEPlotShellTopNodalStrains(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){ SetUnits(UNIT_NONE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Class that projects Lagrange strains from integration points to the shell nodes
+class FEPlotShellBottomNodalStrains : public FEPlotDomainData
+{
+public:
+    FEPlotShellBottomNodalStrains(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_MULT){ SetUnits(UNIT_NONE); }
+    bool Save(FEDomain& dom, FEDataStream& a);
 };
 
 //-----------------------------------------------------------------------------
@@ -846,6 +1117,15 @@ public:
 };
 
 //-----------------------------------------------------------------------------
+//! Almansi strain
+class FEPlotAlmansiStrain : public FEPlotDomainData
+{
+public:
+    FEPlotAlmansiStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
 // Infinitesimal strain
 class FEPlotInfStrain : public FEPlotDomainData
 {
@@ -861,6 +1141,32 @@ class FEPlotSPRLagrangeStrain : public FEPlotDomainData
 public:
 	FEPlotSPRLagrangeStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_NODE){}
 	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//! SPR infinitesimal strains
+class FEPlotSPRInfStrain : public FEPlotDomainData
+{
+public:
+	FEPlotSPRInfStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_NODE) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Right Cauchy-Green tensor
+class FEPlotRightCauchyGreen : public FEPlotDomainData
+{
+public:
+    FEPlotRightCauchyGreen(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Left Cauchy-Green tensor
+class FEPlotLeftCauchyGreen : public FEPlotDomainData
+{
+public:
+    FEPlotLeftCauchyGreen(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
 };
 
 //-----------------------------------------------------------------------------
@@ -913,7 +1219,7 @@ public:
 class FEPlotRigidReactionForce : public FEPlotDomainData
 {
 public:
-	FEPlotRigidReactionForce(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) {}
+	FEPlotRigidReactionForce(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_FORCE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -1011,11 +1317,25 @@ public:
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
+class FEPlotDiscreteElementDirection : public FEPlotDomainData
+{
+public:
+	FEPlotDiscreteElementDirection(FEModel* fem) : FEPlotDomainData(fem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+class FEPlotDiscreteElementLength : public FEPlotDomainData
+{
+public:
+	FEPlotDiscreteElementLength(FEModel* fem) : FEPlotDomainData(fem, PLT_FLOAT, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
 //-----------------------------------------------------------------------------
 class FEPlotDiscreteElementForce : public FEPlotDomainData
 {
 public:
-	FEPlotDiscreteElementForce(FEModel* fem) : FEPlotDomainData(fem, PLT_VEC3F, FMT_ITEM) {}
+	FEPlotDiscreteElementForce(FEModel* fem) : FEPlotDomainData(fem, PLT_VEC3F, FMT_ITEM) { SetUnits(UNIT_FORCE); }
 	bool Save(FEDomain& dom, FEDataStream& a);
 };
 
@@ -1094,8 +1414,11 @@ public: FEPlotContinuousDamage_D2beta(FEModel* fem) : FEPlotContinuousDamage_(fe
 class FEPlotRVEgenerations : public FEPlotDomainData
 {
 public:
-    FEPlotRVEgenerations(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) {}
-    bool Save(FEDomain& dom, FEDataStream& a);
+    FEPlotRVEgenerations(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { m_comp = -1; }
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -1103,8 +1426,23 @@ public:
 class FEPlotRVEbonds : public FEPlotDomainData
 {
 public:
-    FEPlotRVEbonds(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) {}
-    bool Save(FEDomain& dom, FEDataStream& a);
+    FEPlotRVEbonds(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { m_comp = -1; }
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
+};
+
+//-----------------------------------------------------------------------------
+//! Weak bond recruitment ratio in reactive viscoelastic material point
+class FEPlotRVErecruitment : public FEPlotDomainData
+{
+public:
+    FEPlotRVErecruitment(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { m_comp = -1; }
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -1112,8 +1450,11 @@ public:
 class FEPlotRVEstrain : public FEPlotDomainData
 {
 public:
-    FEPlotRVEstrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) {}
-    bool Save(FEDomain& dom, FEDataStream& a);
+    FEPlotRVEstrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) { m_comp = -1; }
+    bool SetFilter(const char* szfilter) override;
+    bool Save(FEDomain& dom, FEDataStream& a) override;
+protected:
+    int        m_comp;
 };
 
 //-----------------------------------------------------------------------------
@@ -1150,4 +1491,193 @@ class FEPlotWeakBondDevSED : public FEPlotDomainData
 public:
     FEPlotWeakBondDevSED(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) {}
     bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! truss element stretch
+class FEPlotTrussStretch : public FEPlotDomainData
+{
+public:
+	FEPlotTrussStretch(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth deformation gradient (Kinematic Growth)
+class FEPlotGrowthDeformationGradient : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthDeformationGradient(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3F, FMT_ITEM) {}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth  Lagrange strains
+class FEPlotGrowthLagrangeStrain : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthLagrangeStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+// Growth infinitesimal strain
+class FEPlotGrowthInfStrain : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthInfStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM) {}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth right stretch
+class FEPlotGrowthRightStretch : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthRightStretch(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth left stretch
+class FEPlotGrowthLeftStretch : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthLeftStretch(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth right Hencky
+class FEPlotGrowthRightHencky : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthRightHencky(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth left Hencky
+class FEPlotGrowthLeftHencky : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthLeftHencky(FEModel* pfem) : FEPlotDomainData(pfem, PLT_MAT3FS, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! Growth relative volume
+class FEPlotGrowthRelativeVolume : public FEPlotDomainData
+{
+public:
+    FEPlotGrowthRelativeVolume(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_ITEM){}
+    bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+
+//-----------------------------------------------------------------------------
+//! beam element stress
+class FEPlotBeamStress : public FEPlotDomainData
+{
+public:
+	FEPlotBeamStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! beam element stress in reference frame
+class FEPlotBeamReferenceStress : public FEPlotDomainData
+{
+public:
+	FEPlotBeamReferenceStress(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! beam element stress couple
+class FEPlotBeamStressCouple : public FEPlotDomainData
+{
+public:
+	FEPlotBeamStressCouple(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! beam element stress couple in reference frame
+class FEPlotBeamReferenceStressCouple : public FEPlotDomainData
+{
+public:
+	FEPlotBeamReferenceStressCouple(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! beam element strain
+class FEPlotBeamStrain : public FEPlotDomainData
+{
+public:
+	FEPlotBeamStrain(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//-----------------------------------------------------------------------------
+//! beam element curvature
+class FEPlotBeamCurvature : public FEPlotDomainData
+{
+public:
+	FEPlotBeamCurvature(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) {}
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+// plot the current pressure value of the FEIdealGasPressure load
+class FEIdealGasPressure;
+class FEPlotIdealGasPressure : public FEPlotSurfaceData
+{
+public:
+	FEPlotIdealGasPressure(FEModel* fem) : FEPlotSurfaceData(fem, PLT_FLOAT, FMT_REGION) {}
+	bool Save(FESurface& surf, FEDataStream& a) override;
+
+private:
+	bool Init() override;
+	bool m_binit = false;
+	FEIdealGasPressure* m_load = nullptr;
+};
+
+class FEPlotBodyForce : public FEPlotDomainData
+{
+public:
+	FEPlotBodyForce(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_ITEM) { SetUnits(UNIT_SPECIFIC_FORCE); }
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+class FEPlotTotalLinearMomentum : public FEPlotDomainData
+{
+public:
+	FEPlotTotalLinearMomentum(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_ENERGY); }
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+class FEPlotTotalAngularMomentum : public FEPlotDomainData
+{
+public:
+	FEPlotTotalAngularMomentum(FEModel* pfem) : FEPlotDomainData(pfem, PLT_VEC3F, FMT_REGION) { SetUnits(UNIT_ENERGY); }
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+class FEPlotTotalEnergy : public FEPlotDomainData
+{
+public:
+	FEPlotTotalEnergy(FEModel* pfem) : FEPlotDomainData(pfem, PLT_FLOAT, FMT_REGION) { SetUnits(UNIT_ENERGY); }
+	bool Save(FEDomain& dom, FEDataStream& a);
+};
+
+//=============================================================================
+//                            E D G E   D A T A
+//=============================================================================
+
+class FEPlotEdgeContactGap : public FEPlotEdgeData
+{
+public:
+	FEPlotEdgeContactGap(FEModel* fem) : FEPlotEdgeData(fem, PLT_FLOAT, FMT_NODE) { SetUnits(UNIT_LENGTH); }
+	bool Save(FEEdge& edge, FEDataStream& a);
 };

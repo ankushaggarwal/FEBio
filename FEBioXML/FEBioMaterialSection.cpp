@@ -29,9 +29,7 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEBioMaterialSection.h"
 #include "FECore/FEModel.h"
-#include "FECore/FECoreKernel.h"
 #include "FECore/FEMaterial.h"
-#include <FEBioMech/FEUncoupledMaterial.h>
 #include <FECore/log.h>
 #include <sstream>
 
@@ -104,20 +102,15 @@ void FEBioMaterialSection::Parse(XMLTag& tag)
 			FEMaterial* pmat = CreateMaterial(tag); assert(pmat);
 			pmat->SetName(name);
 
-			// add the material
-			fem.AddMaterial(pmat);
-			++m_nmat;
-
 			// set the material's ID
+			++m_nmat;
 			pmat->SetID(m_nmat);
 
 			// parse the material parameters
 			ReadParameterList(tag, pmat);
 
-			// For uncoupled materials, we collect the bulk moduli of child materials
-			// and assign it to the top-level material (this one)
-			FEUncoupledMaterial* pucm = dynamic_cast<FEUncoupledMaterial*>(pmat);
-			if (pucm) FixUncoupledMaterial(pucm);
+			// add the material
+			GetBuilder()->AddMaterial(pmat);
 		}
 		else throw XMLReader::InvalidTag(tag);
 
@@ -126,23 +119,6 @@ void FEBioMaterialSection::Parse(XMLTag& tag)
 	}
 	while (!tag.isend());
 }
-
-void FEBioMaterialSection::FixUncoupledMaterial(FEUncoupledMaterial* mat)
-{
-	double K = mat->m_K;
-	for (int i = 0; i < mat->Properties(); ++i)
-	{
-		FEUncoupledMaterial* mati = dynamic_cast<FEUncoupledMaterial*>(mat->GetProperty(i));
-		if (mati)
-		{
-			FixUncoupledMaterial(mati);
-			K += mati->m_K;
-			mati->m_K = 0.0;
-		}
-	}
-	mat->m_K = K;
-}
-
 
 //===============================================================================
 
@@ -174,12 +150,6 @@ void FEBioMaterialSection3::Parse(XMLTag& tag)
 {
 	FEModel& fem = *GetFEModel();
 
-	// Make sure no materials are defined
-	if (fem.Materials() != 0) throw FEBioImport::DuplicateMaterialSection();
-
-	// reset material counter
-	m_nmat = 0;
-
 	++tag;
 	do
 	{
@@ -206,10 +176,9 @@ void FEBioMaterialSection3::Parse(XMLTag& tag)
 
 			// add the material
 			fem.AddMaterial(pmat);
-			++m_nmat;
 
 			// set the material's ID
-			pmat->SetID(m_nmat);
+			pmat->SetID(nid);
 
 			// parse the material parameters
 			ReadParameterList(tag, pmat);

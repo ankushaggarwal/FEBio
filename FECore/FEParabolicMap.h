@@ -25,22 +25,25 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.*/
 #pragma once
 #include "FEDataGenerator.h"
+#include "FEDofList.h"
 
 class FESurface;
 
-class FECORE_API FEParabolicMap : public FEDataGenerator
+class FECORE_API FEParabolicMap : public FEFaceDataGenerator
 {
 public:
 	FEParabolicMap(FEModel* fem);
 
 	~FEParabolicMap();
 
-	bool Init() override;
+	FEDataMap* Generate() override;
 
-	bool Generate(FESurfaceMap& data) override;
+	void SetDOFConstraint(const FEDofList& dofs);
 
 private:
 	double	m_scale;
+
+	FEDofList	m_dofs;
 
 	DECLARE_FECORE_CLASS();
 };

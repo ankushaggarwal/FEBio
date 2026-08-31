@@ -31,12 +31,12 @@ SOFTWARE.*/
 
 double defgrad(FESolidElement &el, std::vector<vec3d>& X, std::vector<vec3d>& u, mat3d &F, int n);
 
-BEGIN_FECORE_CLASS(FEDeformationMapGenerator, FEDataGenerator)
+BEGIN_FECORE_CLASS(FEDeformationMapGenerator, FEElemDataGenerator)
 	ADD_PARAMETER(m_nodeDisplacementMap, "node_displacement_map");
 END_FECORE_CLASS();
 
 
-FEDeformationMapGenerator::FEDeformationMapGenerator(FEModel* fem) : FEDataGenerator(fem)
+FEDeformationMapGenerator::FEDeformationMapGenerator(FEModel* fem) : FEElemDataGenerator(fem)
 {
 	m_nodeMap = nullptr;
 }
@@ -59,27 +59,28 @@ bool FEDeformationMapGenerator::Init()
 
 	if (m_nodeMap->DataType() != FE_VEC3D) return false;
 
-	return FEDataGenerator::Init();
+	return FEElemDataGenerator::Init();
 }
 
 // generate the data array for the given element set
-bool FEDeformationMapGenerator::Generate(FEDomainMap& map)
+FEDataMap* FEDeformationMapGenerator::Generate()
 {
-	const FEElementSet& set = *map.GetElementSet();
+	FEElementSet& set = *GetElementSet();
+
+	FEDomainMap* map = new FEDomainMap(FE_MAT3D, FMT_MATPOINTS);
+	if (map->Create(&set) == false)
+	{
+		assert(false);
+		return nullptr;
+	}
 
 	FEMesh& mesh = *set.GetMesh();
-
-	FEDataType dataType = map.DataType();
-	if (dataType != FE_MAT3D) return false;
-
-	int storageFormat = map.StorageFormat();
-	if (storageFormat != FMT_MATPOINTS) return false;
 
 	int N = set.Elements();
 	for (int i = 0; i < N; ++i)
 	{
 		FESolidElement* pel = dynamic_cast<FESolidElement*>(mesh.FindElementFromID(set[i]));
-		if (pel == nullptr) return false;
+		if (pel == nullptr) return nullptr;
 		FESolidElement& el = *pel;
 
 		int ne = el.Nodes();
@@ -95,10 +96,10 @@ bool FEDeformationMapGenerator::Generate(FEDomainMap& map)
 		{
 			mat3d F;
 			defgrad(el, X, u, F, j);
-			map.setValue(i, j, F);
+			map->setValue(i, j, F);
 		}
 	}
-	return true;
+	return map;
 }
 
 double invjac0(FESolidElement &el, std::vector<vec3d>& r0, double Ji[3][3], int n)

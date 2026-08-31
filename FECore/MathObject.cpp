@@ -72,7 +72,7 @@ MathObject::~MathObject()
 }
 
 //-----------------------------------------------------------------------------
-MVariable* MathObject::AddVariable(const std::string& var)
+MVariable* MathObject::AddVariable(const std::string& var, double initVal)
 {
 	if (m_Var.empty() == false)
 	{
@@ -81,7 +81,7 @@ MVariable* MathObject::AddVariable(const std::string& var)
 			if ((*it)->Name() == var) return *it;
 	}
 
-	MVariable* pv = new MVariable(var);
+	MVariable* pv = new MVariable(var, initVal);
 	pv->setIndex((int)m_Var.size());
 	m_Var.push_back(pv);
 	return pv;
@@ -126,6 +126,18 @@ int MSimpleExpression::Items()
 	else return 1;
 }
 
+bool MSimpleExpression::IsValid() const
+{
+	return (m_item.ItemPtr() != nullptr);
+}
+
+//-----------------------------------------------------------------------------
+double MSimpleExpression::value(const std::string& s)
+{
+	Create(s);
+	return value();
+}
+
 //-----------------------------------------------------------------------------
 double MSimpleExpression::value(const MItem* pi) const
 {
@@ -157,7 +169,17 @@ double MSimpleExpression::value(const MItem* pi) const
 	case MSFNC:
 		{
 			return value(msfncnd(pi)->Value());
-		};		
+		};
+		break;
+	case MFND:
+		{
+			const MFuncND* f = mfncnd(pi);
+			int n = f->Params();
+			vector<double> d(n, 0.0);
+			for (int i = 0; i < n; ++i) d[i] = value(f->Param(i));
+			return (f->funcptr())(d.data(), n);
+		}
+		break;
 	default:
 		assert(false);
 		return 0;
@@ -195,7 +217,17 @@ double MSimpleExpression::value(const MItem* pi, const std::vector<double>& var)
 	case MSFNC:
 		{
 			return value(msfncnd(pi)->Value(), var);
-		};		
+		};
+		break;
+	case MFND:
+		{
+			const MFuncND* f = mfncnd(pi);
+			int n = f->Params();
+			vector<double> d(n, 0.0);
+			for (int i = 0; i < n; ++i) d[i] = value(f->Param(i), var);
+			return (f->funcptr())(d.data(), n);
+		}
+		break;
 	default:
 		assert(false);
 		return 0;

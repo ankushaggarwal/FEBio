@@ -1,0 +1,311 @@
+/*This file is part of the FEBio source code and is licensed under the MIT license
+listed below.
+
+See Copyright-FEBio.txt for details.
+
+Copyright (c) 2021 University of Utah, The Trustees of Columbia University in
+the City of New York, and others.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.*/
+#include "stdafx.h"
+#include "FEStiffnessDiagnostic.h"
+#include <FECore/FEModel.h>
+#include <FECore/FEAnalysis.h>
+#include <FECore/FENewtonSolver.h>
+#include <FECore/FEGlobalMatrix.h>
+#include <FECore/FENLConstraint.h>
+#include <FECore/log.h>
+#include <FEBioMech/FEMechModel.h>
+#include <FEBioMech/FERigidBody.h>
+#include <FEBioMech/FESolidSolver2.h>
+#include <iostream>
+
+//-----------------------------------------------------------------------------
+FEStiffnessDiagnostic::FEStiffnessDiagnostic(FEModel* fem) : FECoreTask(fem)
+{
+	m_fp = nullptr;
+	m_writeMatrix = false;
+	m_nmax = -1;
+}
+
+//-----------------------------------------------------------------------------
+// Initialize the diagnostic. In this function we build the FE model depending
+// on the scenario.
+bool FEStiffnessDiagnostic::Init(const char* szarg)
+{
+	if (szarg && szarg[0])
+	{
+		if (strcmp(szarg, "v") == 0) m_writeMatrix = true;
+		else { m_nmax = atoi(szarg); m_writeMatrix = true; }
+	}
+	return GetFEModel()->Init();
+}
+
+//-----------------------------------------------------------------------------
+bool stiffness_diagnostic_cb(FEModel* fem, unsigned int when, void* pd)
+{
+	FEStiffnessDiagnostic* diagnostic = (FEStiffnessDiagnostic*)pd;
+	return diagnostic->Diagnose();
+}
+
+//-----------------------------------------------------------------------------
+// Run the tangent diagnostic. After we run the FE model, we calculate 
+// the element stiffness matrix and compare that to a finite difference
+// of the element residual.
+bool FEStiffnessDiagnostic::Run()
+{
+	// solve the problem
+	FEModel& fem = *GetFEModel();
+
+//	fem.AddCallback(stiffness_diagnostic_cb, CB_MATRIX_REFORM, (void*)this);
+	fem.AddCallback(stiffness_diagnostic_cb, CB_QUASIN_CONVERGED, (void*)this);
+
+	// create a file name for the log file
+	string logfile("diagnostic.log");
+	m_fp = fopen(logfile.c_str(), "wt");
+	fprintf(m_fp, "FEBio Stiffness Diagnostics:\n");
+	fprintf(m_fp, "============================\n");
+
+	fem.BlockLog();
+	bool bret = fem.Solve();
+	fem.UnBlockLog();
+	if (bret == false)
+	{
+		feLogError("FEBio error terminated. Aborting diagnostic.\n");
+		return false;
+	}
+
+	fprintf(m_fp, "diagnostic completed.\n");
+
+	fclose(m_fp);
+	m_fp = nullptr;
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FEStiffnessDiagnostic::Diagnose()
+{
+	FEModel* fem = GetFEModel();
+	FEMechModel* mech = dynamic_cast<FEMechModel*>(fem);
+
+	FEAnalysis* step = fem->GetCurrentStep();
+	if (step == nullptr) return false;
+
+	FESolidSolver2* solver = dynamic_cast<FESolidSolver2*>(step->GetFESolver());
+	FENewtonSolver* nlsolve = dynamic_cast<FENewtonSolver*>(solver);
+	if (nlsolve == nullptr) return false;
+
+	SparseMatrix* pA = nlsolve->m_pK->GetSparseMatrixPtr();
+	if (pA == nullptr) return false;
+
+	const double eps = 1e-8;
+	int neq = pA->Rows();
+
+	// need to know which dofs are prescribed
+	// 0 == fixed, 1 == free
+	vector<int> bc(neq, 0);
+	int nmax = -1;
+	FEMesh& mesh = fem->GetMesh();
+	for (int i = 0; i < mesh.Nodes(); ++i)
+	{
+		FENode& node = mesh.Node(i);
+		if (node.m_rid < 0)
+		{
+			for (int j = 0; j < node.m_ID.size(); ++j)
+			{
+				int n = node.m_ID[j];
+				if (n >= 0) bc[n] = 1;
+				if (n > nmax) nmax = n;
+			}
+		}
+		else
+		{
+			for (int j = 0; j < node.m_ID.size(); ++j)
+			{
+				int n = -node.m_ID[j]-2;
+				if (n >= 0) bc[n] = 1;
+				if (n > nmax) nmax = n;
+			}
+		}
+	}
+
+	if (mech)
+	{
+		for (int i = 0; i < mech->RigidBodies(); ++i)
+		{
+			FERigidBody& rb = *mech->GetRigidBody(i);
+			for (int j = 0; j < 6; ++j)
+			{
+				int n = rb.m_LM[j];
+				if (n >= 0) bc[n] = 1;
+				if (n > nmax) nmax = n;
+			}
+		}
+	}
+
+	if (nmax < neq)
+	{
+		// these are probably lagrange multiplier dofs
+		for (int i = nmax + 1; i < neq; ++i) bc[i] = 1;
+	}
+
+	std::vector<double> R0(neq, 0);
+	nlsolve->Residual(R0);
+	double max_val = 0, max_err = 0.0;
+	int i_max = -1, j_max = -1;
+	std::cerr << "\nstarting diagnostic:\nprogress:";
+	int pct = 0;
+
+	int nreq = (m_nmax <= 0 ? neq : m_nmax);
+	if (nreq > neq) nreq = neq;
+
+	for (int j = 0; j < nreq; ++j)
+	{
+		std::vector<double> u(neq, 0);
+		std::vector<double> R(neq, 0);
+		u[j] = eps;
+		nlsolve->Update(u);
+		nlsolve->Residual(R);
+
+		int new_pct = (100 * j) / neq;
+		if (pct != new_pct) {
+			if ((new_pct % 10) == 0)
+				std::cerr << "+"; 
+			else
+				std::cerr << "-"; 
+			pct = new_pct;
+		}
+
+		for (int i = 0; i < nreq; ++i)
+		{
+			// note that we flip the sign on ka.
+			// this is because febio actually calculates the negative of the residual
+			double ka_ij = 0;
+			if ((bc[i] == 0) || (bc[j] == 0))
+			{
+				if (i == j) ka_ij = 1;
+				else ka_ij = 0;
+			}
+			else ka_ij = -(R[i] - R0[i]) / eps;
+
+			double kt_ij = pA->get(i, j);
+
+			if (fabs(kt_ij) > max_val) max_val = fabs(kt_ij);
+
+			double err = fabs(kt_ij - ka_ij);
+			if (err > max_err)
+			{
+				max_err = err;
+				i_max = i;
+				j_max = j;
+			}
+
+			if (m_writeMatrix)
+			{
+				fprintf(m_fp, "%d, %d : %lg, %lg (%lg)\n", i, j, kt_ij, ka_ij, err);
+			}
+		}
+	}
+	std::cerr << "\n";
+
+	// let's make sure we leave the model in a consistent state
+	std::vector<double> u(neq, 0);
+	std::vector<double> R(neq, 0);
+	nlsolve->Update(u);
+	nlsolve->Residual(R);
+
+	printf("Max abs. value: %lg\n", max_val);
+	fprintf(m_fp, "Max abs. value: %lg\n", max_val);
+	if (max_val == 0) max_val = 1;
+
+	printf("Max error: %lg (%d, %d)\n", max_err, i_max, j_max);
+	printf("Max rel. error: %lg (%d, %d)\n", max_err / max_val, i_max, j_max);
+	fprintf(m_fp, "Max error: %lg (%d, %d)\n", max_err, i_max, j_max);
+	fprintf(m_fp, "Max rel. error: %lg (%d, %d)\n", max_err / max_val, i_max, j_max);
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Calculate a finite difference approximation of the derivative of the
+// element residual.
+void FEStiffnessDiagnostic::deriv_residual(matrix& ke)
+{
+/*	// get the solver
+	FEModel& fem = *GetFEModel();
+	FEAnalysis* pstep = fem.GetCurrentStep();
+	FESolidSolver2& solver = static_cast<FESolidSolver2&>(*pstep->GetFESolver());
+
+	// get the degrees of freedom
+	const int dof_X = fem.GetDOFIndex("x");
+	const int dof_Y = fem.GetDOFIndex("y");
+	const int dof_Z = fem.GetDOFIndex("z");
+
+	// get the mesh
+	FEMesh& mesh = fem.GetMesh();
+
+	FEElasticSolidDomain& bd = static_cast<FEElasticSolidDomain&>(mesh.Domain(0));
+
+	// get the one and only element
+	FESolidElement& el = bd.Element(0);
+
+	// first calculate the initial residual
+	vector<double> f0(24);
+	zero(f0);
+	bd.ElementInternalForce(el, f0);
+
+	// now calculate the perturbed residuals
+	ke.resize(24, 24);
+	ke.zero();
+	int i, j, nj;
+	int N = mesh.Nodes();
+	double dx = 1e-8;
+	vector<double> f1(24);
+	for (j = 0; j < 3 * N; ++j)
+	{
+		FENode& node = mesh.Node(el.m_node[j / 3]);
+		nj = j % 3;
+
+		switch (nj)
+		{
+		case 0: node.add(dof_X, dx); node.m_rt.x += dx; break;
+		case 1: node.add(dof_Y, dx); node.m_rt.y += dx; break;
+		case 2: node.add(dof_Z, dx); node.m_rt.z += dx; break;
+		}
+
+
+		fem.Update();
+
+		zero(f1);
+		bd.ElementInternalForce(el, f1);
+
+		switch (nj)
+		{
+		case 0: node.sub(dof_X, dx); node.m_rt.x -= dx; break;
+		case 1: node.sub(dof_Y, dx); node.m_rt.y -= dx; break;
+		case 2: node.sub(dof_Z, dx); node.m_rt.z -= dx; break;
+		}
+
+		fem.Update();
+
+		for (i = 0; i < 3 * N; ++i) ke[i][j] = -(f1[i] - f0[i]) / dx;
+	}
+*/
+}

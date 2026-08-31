@@ -35,27 +35,27 @@ SOFTWARE.*/
 //=============================================================================
 
 //-----------------------------------------------------------------------------
-class FENodeFluidXVel : public FENodeLogData
+class FENodeFluidXVel : public FELogNodeData
 {
 public:
-    FENodeFluidXVel(FEModel* pfem) : FENodeLogData(pfem){}
-    double value(int node);
+    FENodeFluidXVel(FEModel* pfem) : FELogNodeData(pfem){}
+    double value(const FENode& node) override;
 };
 
 //-----------------------------------------------------------------------------
-class FENodeFluidYVel : public FENodeLogData
+class FENodeFluidYVel : public FELogNodeData
 {
 public:
-    FENodeFluidYVel(FEModel* pfem) : FENodeLogData(pfem){}
-    double value(int node);
+    FENodeFluidYVel(FEModel* pfem) : FELogNodeData(pfem){}
+	double value(const FENode& node) override;
 };
 
 //-----------------------------------------------------------------------------
-class FENodeFluidZVel : public FENodeLogData
+class FENodeFluidZVel : public FELogNodeData
 {
 public:
-    FENodeFluidZVel(FEModel* pfem) : FENodeLogData(pfem){}
-    double value(int node);
+    FENodeFluidZVel(FEModel* pfem) : FELogNodeData(pfem){}
+	double value(const FENode& node) override;
 };
 
 //=============================================================================
@@ -235,6 +235,38 @@ class FELogFluidStressXZ : public FELogElemData
 {
 public:
     FELogFluidStressXZ(FEModel* pfem) : FELogElemData(pfem){}
+    double value(FEElement& el);
+};
+
+//-----------------------------------------------------------------------------
+class FELogFluidStress1 : public FELogElemData
+{
+public:
+    FELogFluidStress1(FEModel* pfem) : FELogElemData(pfem){}
+    double value(FEElement& el);
+};
+
+//-----------------------------------------------------------------------------
+class FELogFluidStress2 : public FELogElemData
+{
+public:
+    FELogFluidStress2(FEModel* pfem) : FELogElemData(pfem){}
+    double value(FEElement& el);
+};
+
+//-----------------------------------------------------------------------------
+class FELogFluidStress3 : public FELogElemData
+{
+public:
+    FELogFluidStress3(FEModel* pfem) : FELogElemData(pfem){}
+    double value(FEElement& el);
+};
+
+//-----------------------------------------------------------------------------
+class FELogFluidMaxShearStress : public FELogElemData
+{
+public:
+    FELogFluidMaxShearStress(FEModel* pfem) : FELogElemData(pfem){}
     double value(FEElement& el);
 };
 

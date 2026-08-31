@@ -34,6 +34,8 @@ SOFTWARE.*/
 #include "DumpStream.h"
 #include "matrix.h"
 #include <FECore/log.h>
+#include "FEModelParam.h"
+#include "FEMesh.h"
 
 //-----------------------------------------------------------------------------
 FESurface::FESurface(FEModel* fem) : FEMeshPartition(FE_DOMAIN_SURFACE, fem)
@@ -59,8 +61,8 @@ void FESurface::Create(int nsize, int elemType)
 		FESurfaceElement& el = m_el[i];
 		el.SetLocalID(i);
 		el.SetMeshPartition(this);
-		el.m_elem[0] = nullptr;
-		el.m_elem[1] = nullptr;
+		el.m_elem[0].Reset();
+		el.m_elem[1].Reset();
 	}
 
 	if (elemType != -1)
@@ -198,11 +200,14 @@ void FESurface::Update(const FETimeInfo& tp)
 
 			double* Gr = el.Gr(n);
 			double* Gs = el.Gs(n);
+            double* H = el.H(n);
 
+            mp.m_rt = vec3d(0,0,0);
 			mp.dxr = vec3d(0, 0, 0);
 			mp.dxs = vec3d(0, 0, 0);
 			for (int i = 0; i < neln; ++i)
 			{
+                mp.m_rt += rt[i] * H[i];
 				mp.dxr += rt[i] * Gr[i];
 				mp.dxs += rt[i] * Gs[i];
 			}
@@ -266,18 +271,24 @@ bool FESurface::Init()
 	// initialize the surface data
 	InitSurface();
 
+	// NOTE: Make sure the mesh has its node-element list initialized
+	// otherwise the omp loop below might crash due to race condition.
+	GetMesh()->NodeElementList();
+
 	// see if we can find all elements that the faces belong to
 	int invalidFacets = 0;
 	int ne = Elements();
+#pragma omp parallel for reduction(+:invalidFacets)
 	for (int i=0; i<ne; ++i)
 	{
 		FESurfaceElement& el = Element(i);
-        if (m_bitfc && (el.m_elem[0] == nullptr)) FindElements(el);
-		else if (el.m_elem[0] == nullptr) el.m_elem[0] = FindElement(el);
+        if (m_bitfc && (el.m_elem[0].pe == nullptr)) FindElements(el);
+		else if (el.m_elem[0].pe == nullptr) el.m_elem[0] = FindElement(el);
         //to make sure
-        else if (m_bitfc && (el.m_elem[1] == nullptr)) FindElements(el);
-		if (el.m_elem[0] == nullptr) { invalidFacets++; }
+        else if (m_bitfc && (el.m_elem[1].pe == nullptr)) FindElements(el);
+		if (el.m_elem[0].pe == nullptr) { invalidFacets++; }
 	}
+
 	if (invalidFacets > 0)
 	{
 		std::string surfName = GetName();
@@ -309,6 +320,7 @@ bool FESurface::Init()
 			}
 
 			pt->m_r0 = rn;
+            pt->m_rt = pt->m_rp = rn;
 
 			// calculate initial surface tangents
 			double* Gr = el.Gr(n);
@@ -328,17 +340,23 @@ bool FESurface::Init()
 		}
 	}
 
+    // allocate node normals and evaluate them in initial configuration
+    m_nn.assign(Nodes(), vec3d(0,0,0));
+    UpdateNodeNormals();
+    
 	return true;
 }
 
 //-----------------------------------------------------------------------------
 //! Find the element that a face belongs to
 // TODO: I should be able to speed this up
-FEElement* FESurface::FindElement(FESurfaceElement& el)
+FESurfaceElement::ELEMENT_REF FESurface::FindElement(FESurfaceElement& el)
 {
 	// get the mesh to which this surface belongs
 	FEMesh& mesh = *GetMesh();
 	FENodeElemList& NEL = mesh.NodeElementList();
+
+	FESurfaceElement::ELEMENT_REF ref;
 
 	int node = el.m_node[0];
 	int nval = NEL.Valence(node);
@@ -354,23 +372,31 @@ FEElement* FESurface::FindElement(FESurfaceElement& el)
 			nn = pe->GetFace(j, nf);
 			if (nn == el.Nodes())
 			{
+				int orient = 0;
 				switch (nn)
 				{
-				case  3: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2])) return pe; break;
-				case  4: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2]) && el.HasNode(nf[3])) return pe; break;
-				case  6: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2])) return pe; break;
-				case  7: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2])) return pe; break;
-				case  8: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2]) && el.HasNode(nf[3])) return pe; break;
-				case  9: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2]) && el.HasNode(nf[3])) return pe; break;
-				case 10: if (el.HasNode(nf[0]) && el.HasNode(nf[1]) && el.HasNode(nf[2])) return pe; break;
+				case 3: orient = el.HasNodes(nf, 3); break;
+				case 4: orient = el.HasNodes(nf, 4); break;
+				case 6: orient = el.HasNodes(nf, 3); break;
+				case 7: orient = el.HasNodes(nf, 3); break;
+				case 8: orient = el.HasNodes(nf, 4); break;
+				case 9: orient = el.HasNodes(nf, 4); break;
 				default:
 					assert(false);
+				}
+
+				if (orient != 0)
+				{
+					ref.pe = pe;
+					ref.face = j;
+					ref.orient = orient;
+					return ref;
 				}
 			}
 		}
 	}
 
-	return nullptr;
+	return ref;
 }
 
 void FESurface::ForEachSurfaceElement(std::function<void(FESurfaceElement& el)> f)
@@ -391,36 +417,47 @@ void FESurface::FindElements(FESurfaceElement& el)
 	for (int i = 0; i < nval; ++i)
 	{
 		FEElement& sel = *ppe[i];
-            
-		// check all faces of this solid element
-		int nfaces = sel.Faces();
-		for (int j = 0; j<nfaces; ++j) 
+		if (sel.isActive())
 		{
-			int nf[9];
-			vec3d g[3];
-			int nn = sel.GetFace(j, nf);
-                
-			int found = 0;
-			if (nn == el.Nodes())
+			// check all faces of this solid element
+			int orient = 0;
+			int nfaces = sel.Faces();
+			for (int j = 0; j < nfaces; ++j)
 			{
-                switch (nn)
-                {
-                    case 3: found = el.HasNodes(nf,3); break;
-                    case 4: found = el.HasNodes(nf,4); break;
-                    case 6: found = el.HasNodes(nf,3); break;
-                    case 7: found = el.HasNodes(nf,3); break;
-                    case 8: found = el.HasNodes(nf,4); break;
-                    case 9: found = el.HasNodes(nf,4); break;
-                    default:
-                        assert(false);
-                }
-            }
-            if (found != 0) {
-                if (el.m_elem[0] == nullptr) { el.m_elem[0] = &sel; }
-                else if (el.m_elem[0] != &sel) el.m_elem[1] = &sel;
-            }
-        }
-    }
+				int nf[FEElement::MAX_NODES];
+				vec3d g[3];
+				int nn = sel.GetFace(j, nf);
+				if (nn == el.Nodes())
+				{
+					switch (nn)
+					{
+					case 3: orient = el.HasNodes(nf, 3); break;
+					case 4: orient = el.HasNodes(nf, 4); break;
+					case 6: orient = el.HasNodes(nf, 3); break;
+					case 7: orient = el.HasNodes(nf, 3); break;
+					case 8: orient = el.HasNodes(nf, 4); break;
+					case 9: orient = el.HasNodes(nf, 4); break;
+					default:
+						assert(false);
+					}
+				}
+				if (orient != 0) {
+					if (el.m_elem[0].pe == nullptr) 
+					{ 
+						el.m_elem[0].pe = &sel;
+						el.m_elem[0].face = j;
+						el.m_elem[0].orient = orient;
+					}
+					else if (el.m_elem[0].pe != &sel)
+					{
+						el.m_elem[1].pe = &sel;
+						el.m_elem[1].face = j;
+						el.m_elem[1].orient = orient;
+					}
+				}
+			}
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -682,7 +719,7 @@ vec3d FESurface::Position(FESurfaceElement& el, double r, double s)
 	// get the elements nodal positions
 	vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i = 0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).m_rt;
-    else for (int i = 0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).m_st();
+    else for (int i = 0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).st();
 
 	double H[FEElement::MAX_NODES];
 	el.shape_fnc(H, r, s);
@@ -710,7 +747,7 @@ vec3d FESurface::Position(FESurfaceElement &el, int n)
     // get the elements nodal positions
     vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i = 0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).m_rt;
-    else for (int i = 0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).m_st();
+    else for (int i = 0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).st();
     
     double* H = el.H(n);
     
@@ -728,7 +765,15 @@ void FESurface::NodalCoordinates(FESurfaceElement& el, vec3d* re)
 {
 	int ne = el.Nodes();
 	if (!m_bshellb) for (int i = 0; i < ne; ++i) re[i] = Node(el.m_lnode[i]).m_rt;
-    else for (int i = 0; i < ne; ++i) re[i] = Node(el.m_lnode[i]).m_st();
+    else for (int i = 0; i < ne; ++i) re[i] = Node(el.m_lnode[i]).st();
+}
+
+//-----------------------------------------------------------------------------
+void FESurface::PreviousNodalCoordinates(FESurfaceElement& el, vec3d* re)
+{
+    int ne = el.Nodes();
+    if (!m_bshellb) for (int i = 0; i < ne; ++i) re[i] = Node(el.m_lnode[i]).m_rp;
+    else for (int i = 0; i < ne; ++i) re[i] = Node(el.m_lnode[i]).sp();
 }
 
 //-----------------------------------------------------------------------------
@@ -736,7 +781,7 @@ void FESurface::NodalCoordinates(FESurfaceElement& el, vec3d* re)
 //! return +1 if face points away from element, -1 if face points into element, 0 if invalid solution found
 double FESurface::FacePointing(FESurfaceElement& se, FEElement& el)
 {
-    FEMesh& mesh = GetFEModel()->GetMesh();
+    FEMesh& mesh = *GetMesh();
     // get point on surface element
     vec3d sp = Position(se, 0,0);
     
@@ -760,7 +805,7 @@ double FESurface::FacePointing(FESurfaceElement& se, FEElement& el)
         for (int i=0; i<sel->Nodes(); ++i) {
             FENode& node = mesh.Node(sel->m_node[i]);
             c += node.m_rt;
-            c += node.m_st();
+            c += node.st();
         }
         c /= (2*sel->Nodes());
     }
@@ -792,7 +837,7 @@ vec3d FESurface::ProjectToSurface(FESurfaceElement& el, vec3d x, double& r, doub
 	// get the elements nodal positions
 	vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i=0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).m_rt;
-    else for (int i=0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).m_st();
+    else for (int i=0; i<ne; ++i) y[i] = mesh.Node(el.m_node[i]).st();
 
 	// calculate normal projection of x onto element
 	vec3d q;
@@ -861,7 +906,7 @@ double FESurface::FaceArea(FESurfaceElement& el)
 	// get the initial nodes
 	vec3d r0[FEElement::MAX_NODES];
 	if (!m_bshellb) for (int i=0; i<neln; ++i) r0[i] = mesh.Node(el.m_node[i]).m_r0;
-    else for (int i=0; i<neln; ++i) r0[i] = mesh.Node(el.m_node[i]).m_s0();
+    else for (int i=0; i<neln; ++i) r0[i] = mesh.Node(el.m_node[i]).s0();
 
 	// get the integration weights
 	double* w = el.GaussWeights();
@@ -915,7 +960,7 @@ double FESurface::CurrentFaceArea(FESurfaceElement& el)
 	// get the initial nodes
 	vec3d rt[FEElement::MAX_NODES];
 	if (!m_bshellb) for (int i = 0; i < neln; ++i) rt[i] = mesh.Node(el.m_node[i]).m_rt;
-	else for (int i = 0; i < neln; ++i) rt[i] = mesh.Node(el.m_node[i]).m_st();
+	else for (int i = 0; i < neln; ++i) rt[i] = mesh.Node(el.m_node[i]).st();
 
 	// get the integration weights
 	double* w = el.GaussWeights();
@@ -990,7 +1035,7 @@ mat2d FESurface::Metric0(FESurfaceElement& el, double r, double s)
 	// element nodes
 	vec3d r0[FEElement::MAX_NODES];
 	if (!m_bshellb) for (int i=0; i<neln; ++i) r0[i] = m_pMesh->Node(el.m_node[i]).m_r0;
-    else for (int i=0; i<neln; ++i) r0[i] = m_pMesh->Node(el.m_node[i]).m_s0();
+    else for (int i=0; i<neln; ++i) r0[i] = m_pMesh->Node(el.m_node[i]).s0();
 	
 	// shape function derivatives
 	double Hr[FEElement::MAX_NODES], Hs[FEElement::MAX_NODES];
@@ -1023,7 +1068,7 @@ mat2d FESurface::Metric(FESurfaceElement& el, double r, double s)
 	// element nodes
 	vec3d rt[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i=0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).m_rt;
-    else for (int i=0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).m_st();
+    else for (int i=0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).st();
 	
 	// shape function derivatives
 	double Hr[FEElement::MAX_NODES], Hs[FEElement::MAX_NODES];
@@ -1056,7 +1101,7 @@ mat2d FESurface::Metric(const FESurfaceElement& el, int n) const
     // element nodes
     vec3d rt[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i=0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).m_rt;
-    else for (int i=0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).m_st();
+    else for (int i=0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).st();
     
     // get the shape function derivatives at this integration point
     double* Hr = el.Gr(n);
@@ -1106,6 +1151,26 @@ mat2d FESurface::MetricP(FESurfaceElement& el, int n)
 }
 
 //-----------------------------------------------------------------------------
+//! This function calculates the global location of an integration point in its reference configuration
+//!
+
+vec3d FESurface::Local2Global0(FESurfaceElement &el, int n)
+{
+    FEMesh& m = *m_pMesh;
+    
+    // get the shape functions at this integration point
+    double* H = el.H(n);
+    
+    // calculate the location
+    vec3d r(0);
+    int ne = el.Nodes();
+    if (!m_bshellb) for (int i=0; i<ne; ++i) r += m.Node(el.m_node[i]).m_r0*H[i];
+    else for (int i=0; i<ne; ++i) r += m.Node(el.m_node[i]).s0()*H[i];
+    
+    return r;
+}
+
+//-----------------------------------------------------------------------------
 //! Given an element an the natural coordinates of a point in this element, this
 //! function returns the global position vector.
 vec3d FESurface::Local2Global(FESurfaceElement &el, double r, double s)
@@ -1117,7 +1182,7 @@ vec3d FESurface::Local2Global(FESurfaceElement &el, double r, double s)
 	int ne = el.Nodes();
 	vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (int l=0; l<ne; ++l) y[l] = mesh.Node(el.m_node[l]).m_rt;
-    else for (int l=0; l<ne; ++l) y[l] = mesh.Node(el.m_node[l]).m_st();
+    else for (int l=0; l<ne; ++l) y[l] = mesh.Node(el.m_node[l]).st();
 
 	// calculate the element position
 	return el.eval(y, r, s);
@@ -1138,7 +1203,7 @@ vec3d FESurface::Local2Global(FESurfaceElement &el, int n)
 	vec3d r(0);
 	int ne = el.Nodes();
     if (!m_bshellb) for (int i=0; i<ne; ++i) r += m.Node(el.m_node[i]).m_rt*H[i];
-    else for (int i=0; i<ne; ++i) r += m.Node(el.m_node[i]).m_st()*H[i];
+    else for (int i=0; i<ne; ++i) r += m.Node(el.m_node[i]).st()*H[i];
 
 	return r;
 }
@@ -1195,7 +1260,7 @@ vec3d FESurface::SurfaceNormal(const FESurfaceElement &el, int n) const
 	int ne = el.Nodes();
 	vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i=0; i<ne; ++i) y[i] = m.Node(el.m_node[i]).m_rt;
-    else for (int i=0; i<ne; ++i) y[i] = m.Node(el.m_node[i]).m_st();
+    else for (int i=0; i<ne; ++i) y[i] = m.Node(el.m_node[i]).st();
 
 	// calculate the tangents
 	vec3d xr, xs;
@@ -1226,7 +1291,7 @@ vec3d FESurface::SurfaceNormal(FESurfaceElement &el, double r, double s) const
 	int ne = el.Nodes();
 	vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (l=0; l<ne; ++l) y[l] = mesh.Node(el.m_node[l]).m_rt;
-    else for (l=0; l<ne; ++l) y[l] = mesh.Node(el.m_node[l]).m_st();
+    else for (l=0; l<ne; ++l) y[l] = mesh.Node(el.m_node[l]).st();
 	
 	// set up shape functions and derivatives
 	double Hr[FEElement::MAX_NODES], Hs[FEElement::MAX_NODES];
@@ -1247,6 +1312,44 @@ vec3d FESurface::SurfaceNormal(FESurfaceElement &el, double r, double s) const
     if (m_bshellb) np = -np;
 	
 	return np;
+}
+
+//-----------------------------------------------------------------------------
+//! This function calculates the node normal. Due to the piecewise continuity
+//! of the surface elements this normal is not uniquely defined so in order to
+//! obtain a unique normal the normal is averaged for each node over all the
+//! element normals at the node
+
+void FESurface::UpdateNodeNormals()
+{
+    const int MN = FEElement::MAX_NODES;
+    vec3d y[MN];
+    
+    // zero nodal normals
+    zero(m_nn);
+    
+    // loop over all elements
+    for (int i=0; i<Elements(); ++i)
+    {
+        FESurfaceElement& el = Element(i);
+        int ne = el.Nodes();
+        
+        // get the nodal coordinates
+        for (int j=0; j<ne; ++j) y[j] = Node(el.m_lnode[j]).m_rt;
+        
+        // calculate the normals
+        for (int j=0; j<ne; ++j)
+        {
+            int jp1 = (j+1)%ne;
+            int jm1 = (j+ne-1)%ne;
+            vec3d n = (y[jp1] - y[j]) ^ (y[jm1] - y[j]);
+            m_nn[el.m_lnode[j]] += n;
+        }
+    }
+    
+    // normalize all vectors
+    const int N = Nodes();
+    for (int i=0; i<N; ++i) m_nn[i].unit();
 }
 
 //-----------------------------------------------------------------------------
@@ -1307,8 +1410,8 @@ void FESurface::CoBaseVectors(FESurfaceElement& el, double r, double s, vec3d t[
     else {
         for (int i=0; i<n; ++i)
         {
-            t[0] -= m.Node(el.m_node[i]).m_st()*Hr[i];
-            t[1] -= m.Node(el.m_node[i]).m_st()*Hs[i];
+            t[0] -= m.Node(el.m_node[i]).st()*Hr[i];
+            t[1] -= m.Node(el.m_node[i]).st()*Hs[i];
         }
     }
 }
@@ -1340,8 +1443,8 @@ void FESurface::CoBaseVectors(const FESurfaceElement& el, int j, vec3d t[2]) con
     else {
         for (int i=0; i<n; ++i)
         {
-            t[0] -= m.Node(el.m_node[i]).m_st()*Hr[i];
-            t[1] -= m.Node(el.m_node[i]).m_st()*Hs[i];
+            t[0] -= m.Node(el.m_node[i]).st()*Hr[i];
+            t[1] -= m.Node(el.m_node[i]).st()*Hs[i];
         }
     }
 }
@@ -1371,6 +1474,38 @@ void FESurface::CoBaseVectorsP(FESurfaceElement& el, int j, vec3d t[2])
 
 //-----------------------------------------------------------------------------
 //! This function calculates the covariant base vectors of a surface element
+//! at an integration point in the reference configuration
+
+void FESurface::CoBaseVectors0(const FESurfaceElement& el, int j, vec3d t[2]) const
+{
+    FEMesh& m = *m_pMesh;
+    
+    // get the nr of nodes
+    int n = el.Nodes();
+    
+    // get the shape function derivatives
+    double* Hr = el.Gr(j);
+    double* Hs = el.Gs(j);
+    
+    t[0] = t[1] = vec3d(0,0,0);
+    if (!m_bshellb) {
+        for (int i=0; i<n; ++i)
+        {
+            t[0] += m.Node(el.m_node[i]).m_r0*Hr[i];
+            t[1] += m.Node(el.m_node[i]).m_r0*Hs[i];
+        }
+    }
+    else {
+        for (int i=0; i<n; ++i)
+        {
+            t[0] -= m.Node(el.m_node[i]).s0()*Hr[i];
+            t[1] -= m.Node(el.m_node[i]).s0()*Hs[i];
+        }
+    }
+}
+
+//-----------------------------------------------------------------------------
+//! This function calculates the covariant base vectors of a surface element
 //! at the natural coordinates (r,s)
 
 void FESurface::CoBaseVectors0(FESurfaceElement &el, double r, double s, vec3d t[2])
@@ -1381,7 +1516,7 @@ void FESurface::CoBaseVectors0(FESurfaceElement &el, double r, double s, vec3d t
 	double H0[MN], H1[MN];
 	int n = el.Nodes();
 	if (!m_bshellb) for (i=0; i<n; ++i) y[i] = m_pMesh->Node(el.m_node[i]).m_r0;
-    else for (i=0; i<n; ++i) y[i] = m_pMesh->Node(el.m_node[i]).m_s0();
+    else for (i=0; i<n; ++i) y[i] = m_pMesh->Node(el.m_node[i]).s0();
 	el.shape_deriv(H0, H1, r, s);
 	t[0] = t[1] = vec3d(0,0,0);
 	for (i=0; i<n; ++i) 
@@ -1446,7 +1581,7 @@ double FESurface::jac0(FESurfaceElement &el, int n)
 	const int nseln = el.Nodes();
 	vec3d r0[FEElement::MAX_NODES];
 	if (!m_bshellb) for (int i=0; i<nseln; ++i) r0[i] = GetMesh()->Node(el.m_node[i]).m_r0;
-    else for (int i=0; i<nseln; ++i) r0[i] = GetMesh()->Node(el.m_node[i]).m_s0();
+    else for (int i=0; i<nseln; ++i) r0[i] = GetMesh()->Node(el.m_node[i]).s0();
 
 	double* Gr = el.Gr(n);
 	double* Gs = el.Gs(n);
@@ -1470,7 +1605,7 @@ double FESurface::jac0(const FESurfaceElement &el, int n, vec3d& nu)
 	const int nseln = el.Nodes();
 	vec3d r0[FEElement::MAX_NODES];
 	if (!m_bshellb) for (int i=0; i<nseln; ++i) r0[i] = GetMesh()->Node(el.m_node[i]).m_r0;
-    else for (int i=0; i<nseln; ++i) r0[i] = GetMesh()->Node(el.m_node[i]).m_s0();
+    else for (int i=0; i<nseln; ++i) r0[i] = GetMesh()->Node(el.m_node[i]).s0();
 
 	double* Gr = el.Gr(n);
 	double* Gs = el.Gs(n);
@@ -1545,7 +1680,7 @@ bool IntersectTri(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double ep
 //! This function calculates the intersection of a ray with a quad
 //! and returns true if the ray intersected.
 //!
-bool IntersectQuad(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double eps)
+bool IntersectQuad(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double eps, bool checkNormal = true)
 {
 	// first we're going to see if the ray intersects the two subtriangles
 	vec3d x1[3], x2[3];
@@ -1614,11 +1749,8 @@ bool IntersectQuad(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double e
 			A[2][0] = F1.z; A[2][1] = F2.z; A[2][2] = F3.z;
 
 			// calculate solution increment
-            mat3d Ai;
-            if (A.invert(Ai) != 0)
-                dx = -(Ai*F);
-            else
-                return false;
+            mat3d Ai = A.inverse();
+			dx = -(Ai*F);
 
 			// update solution
 			l1 += dx.x;
@@ -1634,10 +1766,13 @@ bool IntersectQuad(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double e
 		rs[0] = l1;
 		rs[1] = l2;
 		g     = l3;
-        vec3d nu2 = F1 ^ F2;
-        nu2.unit();
-        double cosq = n*nu2;
-        if (cosq > 0) return false;
+		if (checkNormal)
+		{
+			vec3d nu2 = F1 ^ F2;
+			nu2.unit();
+			double cosq = n * nu2;
+			if (cosq > 0) return false;
+		}
 
 		// see if the point is inside the quad
 		if ((rs[0] >= -1-eps) && (rs[0] <= 1+eps) && 
@@ -1713,11 +1848,8 @@ bool IntersectQuad8(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double 
 		A[2][0] = F1.z; A[2][1] = F2.z; A[2][2] = F3.z;
 
 		// calculate solution increment
-        mat3d Ai;
-        if (A.invert(Ai) != 0)
-            dx = -(Ai*F);
-        else
-            return false;
+        mat3d Ai = A.inverse();
+		dx = -(Ai*F);
 
 		// update solution
 		l1 += dx.x;
@@ -1815,11 +1947,8 @@ bool IntersectQuad9(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double 
 		A[2][0] = F1.z; A[2][1] = F2.z; A[2][2] = F3.z;
 
 		// calculate solution increment
-        mat3d Ai;
-        if (A.invert(Ai) != 0)
-            dx = -(Ai*F);
-        else
-            return false;
+        mat3d Ai = A.inverse();
+		dx = -(Ai*F);
 
 		// update solution
 		l1 += dx.x;
@@ -1948,11 +2077,8 @@ bool IntersectTri6(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double e
 			A[2][0] = F1.z; A[2][1] = F2.z; A[2][2] = F3.z;
 			
 			// calculate solution increment
-            mat3d Ai;
-            if (A.invert(Ai) != 0)
-                dx = -(Ai*F);
-            else
-                return false;
+            mat3d Ai = A.inverse();
+			dx = -(Ai*F);
 			
 			// update solution
 			l1 += dx.x;
@@ -2084,11 +2210,8 @@ bool IntersectTri7(vec3d* y, vec3d r, vec3d n, double rs[2], double& g, double e
 			A[2][0] = F1.z; A[2][1] = F2.z; A[2][2] = F3.z;
 			
 			// calculate solution increment
-            mat3d Ai;
-            if (A.invert(Ai) != 0)
-                dx = -(Ai*F);
-            else
-                return false;
+            mat3d Ai = A.inverse();
+			dx = -(Ai*F);
 			
 			// update solution
 			l1 += dx.x;
@@ -2147,7 +2270,7 @@ void FESurface::Invert()
 //! It simply calls the correct intersection function based on the type
 //! of element.
 //!
-bool FESurface::Intersect(FESurfaceElement& el, vec3d r, vec3d n, double rs[2], double& g, double eps)
+bool FESurface::Intersect(FESurfaceElement& el, vec3d r, vec3d n, double rs[2], double& g, double eps, bool checkNormal)
 {
 	int N = el.Nodes();
 
@@ -2155,13 +2278,13 @@ bool FESurface::Intersect(FESurfaceElement& el, vec3d r, vec3d n, double rs[2], 
 	FEMesh& mesh = *m_pMesh;
 	vec3d y[FEElement::MAX_NODES];
     if (!m_bshellb) for (int i=0; i<N; ++i) y[i] = mesh.Node(el.m_node[i]).m_rt;
-    else for (int i=0; i<N; ++i) y[i] = mesh.Node(el.m_node[i]).m_st();
+    else for (int i=0; i<N; ++i) y[i] = mesh.Node(el.m_node[i]).st();
 
 	// call the correct intersection function
 	switch (N)
 	{
 	case 3: return IntersectTri  (y, r, n, rs, g, eps); break;
-	case 4: return IntersectQuad (y, r, n, rs, g, eps); break;
+	case 4: return IntersectQuad (y, r, n, rs, g, eps, checkNormal); break;
 	case 6: return IntersectTri6 (y, r, n, rs, g, eps); break;
 	case 7: return IntersectTri7 (y, r, n, rs, g, eps); break;
 	case 8: return IntersectQuad8(y, r, n, rs, g, eps); break;
@@ -2192,6 +2315,7 @@ void FESurface::Serialize(DumpStream &ar)
 			for (int i = 0; i < Elements(); ++i)
 			{
 				FESurfaceElement& el = Element(i);
+				el.SetMeshPartition(this);
 				int nint = el.GaussPoints();
 				for (int n = 0; n < nint; ++n)
 				{
@@ -2210,11 +2334,11 @@ void FESurface::Serialize(DumpStream &ar)
 		for (int i = 0; i<ne; ++i)
 		{
 			FESurfaceElement& el = Element(i);
-			if (m_bitfc && (el.m_elem[0] == nullptr)) FindElements(el);
-			else if (el.m_elem[0] == nullptr) el.m_elem[0] = FindElement(el);
+			if (m_bitfc && (el.m_elem[0].pe == nullptr)) FindElements(el);
+			else if (el.m_elem[0].pe == nullptr) el.m_elem[0] = FindElement(el);
 			//to make sure
-			else if (m_bitfc && (el.m_elem[1] == nullptr)) FindElements(el);
-			assert(el.m_elem[0] != nullptr);
+			else if (m_bitfc && (el.m_elem[1].pe == nullptr)) FindElements(el);
+			assert(el.m_elem[0].pe != nullptr);
 		}
 	}
 
@@ -2238,7 +2362,7 @@ void FESurface::GetNodalCoordinates(FESurfaceElement& el, vec3d* rt)
 	FEMesh& mesh = *GetMesh();
 	int neln = el.Nodes();
     if (!m_bshellb) for (int j = 0; j < neln; ++j) rt[j] = mesh.Node(el.m_node[j]).m_rt;
-    else for (int j = 0; j < neln; ++j) rt[j] = mesh.Node(el.m_node[j]).m_st();
+    else for (int j = 0; j < neln; ++j) rt[j] = mesh.Node(el.m_node[j]).st();
 }
 
 //-----------------------------------------------------------------------------
@@ -2247,7 +2371,7 @@ void FESurface::GetReferenceNodalCoordinates(FESurfaceElement& el, vec3d* r0)
 	FEMesh& mesh = *GetMesh();
 	int neln = el.Nodes();
     if (!m_bshellb) for (int j = 0; j < neln; ++j) r0[j] = mesh.Node(el.m_node[j]).m_r0;
-    else for (int j = 0; j < neln; ++j) r0[j] = mesh.Node(el.m_node[j]).m_s0();
+    else for (int j = 0; j < neln; ++j) r0[j] = mesh.Node(el.m_node[j]).s0();
 }
 
 //-----------------------------------------------------------------------------
@@ -2294,14 +2418,16 @@ void FESurface::LoadVector(FEGlobalVector& R, const FEDofList& dofList, bool bre
 {
 	int dofPerNode = dofList.Size();
 	int order = (dofPerNode == 1 ? dofList.InterpolationOrder(0) : -1);
-	vector<double> fe;
-	vector<int> lm;
-	vec3d re[FEElement::MAX_NODES];
-	std::vector<double> G(dofPerNode, 0.0);
-	FESurfaceDofShape dof_a;
+
 	int NE = Elements();
+	#pragma omp parallel for shared(R, dofList, f)
 	for (int i = 0; i < NE; ++i)
 	{
+		vector<double> fe;
+		vector<int> lm;
+		vec3d re[FEElement::MAX_NODES];
+		std::vector<double> G(dofPerNode, 0.0);
+
 		// get the next element
 		FESurfaceElement& el = Element(i);
 
@@ -2317,6 +2443,7 @@ void FESurface::LoadVector(FEGlobalVector& R, const FEDofList& dofList, bool bre
 			GetNodalCoordinates(el, re);
 
 		// calculate element vector
+		FESurfaceDofShape dof_a;
 		double* w = el.GaussWeights();
 		int nint = el.GaussPoints();
 		for (int n = 0; n < nint; ++n)
@@ -2457,4 +2584,73 @@ void FESurface::LoadStiffness(FELinearSystem& LS, const FEDofList& dofList_a, co
 		// assemble element matrix in global stiffness matrix
 		LS.Assemble(ke);
 	}
+}
+
+//-----------------------------------------------------------------------------
+// project FEParamDouble pd to nodes and store nodal values in vector<double> d
+void FESurface::ProjectToNodes(FEParamDouble& pd, std::vector<double>& d)
+{
+    d.assign(Nodes(), 0.0);
+    std::vector<int> nd(Nodes(),0);
+    for (int i=0; i<Elements(); ++i) {
+        FESurfaceElement& el = Element(i);
+        double ei[FEElement::MAX_INTPOINTS];
+        for (int j=0; j<el.GaussPoints(); ++j) {
+            FEMaterialPoint* pt = el.GetMaterialPoint(j);
+            ei[j] = pd(*pt);
+        }
+        double en[FEElement::MAX_NODES];
+        el.project_to_nodes(ei, en);
+        for (int j=0; j<el.Nodes(); ++j) {
+            d[el.m_lnode[j]] += en[j];
+            ++nd[el.m_lnode[j]];
+        }
+    }
+    
+    // evaluate average
+    for (int i=0; i<Nodes(); ++i)
+        if (nd[i]) d[i] /= nd[i];
+}
+
+FECORE_API double CalculateSurfaceVolume(FESurface& s)
+{
+	// get the mesh
+	FEMesh& mesh = *s.GetMesh();
+
+	// loop over all elements
+	double vol = 0.0;
+	int NE = s.Elements();
+	vec3d x[FEElement::MAX_NODES];
+	for (int i = 0; i < NE; ++i)
+	{
+		// get the next element
+		FESurfaceElement& el = s.Element(i);
+
+		// get the nodal coordinates
+		int neln = el.Nodes();
+		for (int j = 0; j < neln; ++j) x[j] = mesh.Node(el.m_node[j]).m_rt;
+
+		// loop over integration points
+		double* w = el.GaussWeights();
+		int nint = el.GaussPoints();
+		for (int n = 0; n < nint; ++n)
+		{
+			// evaluate the position vector at this point
+			vec3d r = el.eval(x, n);
+
+			// calculate the tangent vectors
+			double* Gr = el.Gr(n);
+			double* Gs = el.Gs(n);
+			vec3d dxr(0, 0, 0), dxs(0, 0, 0);
+			for (int j = 0; j < neln; ++j)
+			{
+				dxr += x[j] * Gr[j];
+				dxs += x[j] * Gs[j];
+			}
+
+			// update volume
+			vol += w[n] * (r * (dxr ^ dxs));
+		}
+	}
+	return vol / 3.0;
 }

@@ -27,6 +27,7 @@
 
 
 #pragma once
+#include "FEDamageMaterialPoint.h"
 #include <deque>
 #include <FECore/FEMaterialPoint.h>
 
@@ -57,25 +58,27 @@ public:
 
 //-----------------------------------------------------------------------------
 // Define a material point that stores the fatigue and damage variables.
-class FEReactiveFatigueMaterialPoint : public FEMaterialPoint
+class FEReactiveFatigueMaterialPoint : public FEDamageMaterialPoint
 {
 public:
     // default constructor
-    FEReactiveFatigueMaterialPoint(FEMaterialPoint *pt);
-    // copy constructors
+    FEReactiveFatigueMaterialPoint(FEMaterialPointData*pt);
+    
+	// copy constructors
     FEReactiveFatigueMaterialPoint(const FEReactiveFatigueMaterialPoint& rfmp);
     FEReactiveFatigueMaterialPoint(FEReactiveFatigueMaterialPoint& rfmp);
     
-    FEMaterialPoint* Copy();
+	FEMaterialPointData* Copy() override;
     
-    void Init();
-    void Update(const FETimeInfo& timeInfo);
+    void Init() override;
+    void Update(const FETimeInfo& timeInfo) override;
     
-    void Serialize(DumpStream& ar);
+    void Serialize(DumpStream& ar) override;
     
+    double IntactBonds() const override { return m_wit; }
+    double FatigueBonds() const override { return m_wft; }
+
 public:
-    double      m_D;            //!< damage (0 = no damage, 1 = complete damage)
-    
     double      m_wit;          //!< intact bond mass fraction at current time
     double      m_wip;          //!< intact bond mass fraction at previous time
     
@@ -93,8 +96,9 @@ public:
     double      m_wbp;          //!< broken (damaged) bond fraction at previous time
     
     double      m_wft;          //!< fatigue bond fraction at current time
+    double      m_wfp;          //!< fatigue bond fraction at previous time
+
     
-    
-    deque <FatigueBond> m_fb;   //!< generations of fatigued bonds
+    std::deque <FatigueBond> m_fb;   //!< generations of fatigued bonds
 };
 

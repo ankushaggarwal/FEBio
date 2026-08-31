@@ -44,6 +44,8 @@ FEVonMisesPlasticity::FEVonMisesPlasticity(FEModel* pfem) : FESolidMaterial(pfem
 {
 	m_E = m_v = m_Y = m_H = 0;
 	m_K = m_G = 0;
+
+	AddDomainParameter(new FESolidStress());
 }
 
 //-----------------------------------------------------------------------------
@@ -58,9 +60,9 @@ bool FEVonMisesPlasticity::Init()
 }
 
 //-----------------------------------------------------------------------------
-FEMaterialPoint* FEVonMisesPlasticity::CreateMaterialPointData()
+FEMaterialPointData* FEVonMisesPlasticity::CreateMaterialPointData()
 {
-	FEJ2PlasticMaterialPoint* pt = new FEJ2PlasticMaterialPoint(new FEElasticMaterialPoint);
+	FEJ2PlasticMaterialPoint* pt = new FEJ2PlasticMaterialPoint;
 	pt->Y0 = m_Y;
 	return pt;
 }
@@ -68,9 +70,8 @@ FEMaterialPoint* FEVonMisesPlasticity::CreateMaterialPointData()
 //-----------------------------------------------------------------------------
 mat3ds FEVonMisesPlasticity::Stress(FEMaterialPoint &mp)
 {
-	FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
 	FEJ2PlasticMaterialPoint& pp = *mp.ExtractData<FEJ2PlasticMaterialPoint>();
-	mat3d& F = pt.m_F;
+	mat3d& F = pp.m_F;
 	
 	// get the current strain
 	mat3ds e = F.sym() - mat3dd(1.0);
@@ -117,7 +118,6 @@ mat3ds FEVonMisesPlasticity::Stress(FEMaterialPoint &mp)
 //-----------------------------------------------------------------------------
 tens4ds FEVonMisesPlasticity::Tangent(FEMaterialPoint &mp)
 {
-	FEElasticMaterialPoint& pt = *mp.ExtractData<FEElasticMaterialPoint>();
 	FEJ2PlasticMaterialPoint& pp = *mp.ExtractData<FEJ2PlasticMaterialPoint>();
 
 	// lame parameters
@@ -137,7 +137,7 @@ tens4ds FEVonMisesPlasticity::Tangent(FEMaterialPoint &mp)
 	if (pp.b)
 	{
 		// get the stress
-		mat3ds s = pt.m_s;
+		mat3ds s = pp.m_s;
 		mat3ds n = s.dev()*2.0;
 
 		mat3ds A = C.dot(n);
@@ -147,4 +147,11 @@ tens4ds FEVonMisesPlasticity::Tangent(FEMaterialPoint &mp)
 	}
 
 	return C;
+}
+
+FESolidStress::FESolidStress() : FEDomainParameter("stress") {}
+FEParamValue FESolidStress::value(FEMaterialPoint& mp)
+{
+	FEJ2PlasticMaterialPoint& pp = *mp.ExtractData<FEJ2PlasticMaterialPoint>();
+	return pp.m_s;
 }

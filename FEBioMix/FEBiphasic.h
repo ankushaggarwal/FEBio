@@ -37,14 +37,14 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 //! Biphasic material point class.
 //
-class FEBIOMIX_API FEBiphasicMaterialPoint : public FEMaterialPoint
+class FEBIOMIX_API FEBiphasicMaterialPoint : public FEMaterialPointData
 {
 public:
 	//! constructor
-	FEBiphasicMaterialPoint(FEMaterialPoint* ppt);
+	FEBiphasicMaterialPoint(FEMaterialPointData* ppt);
 
 	//! create a shallow copy
-	FEMaterialPoint* Copy() override;
+	FEMaterialPointData* Copy() override;
 
 	//! data serialization
 	void Serialize(DumpStream& ar) override;
@@ -64,7 +64,7 @@ public:
     vec3d		m_gradpp;	//!< gradp at previous time
 	vec3d		m_w;		//!< fluid flux
 	double		m_pa;		//!< actual fluid pressure
-    double      m_phi0;     //!< initial referential solid volume fraction
+    double      m_phi0;     //!< referential solid volume fraction at initial time
 	double		m_phi0t;	//!< referential solid volume fraction at current time
 	double		m_phi0p;	//!< referential solid volume fraction at previous time
 	double		m_phi0hat;	//!< referential solid volume fraction supply at current time
@@ -73,15 +73,38 @@ public:
 };
 
 //-----------------------------------------------------------------------------
+class FEBIOMIX_API FEBiphasicInterface
+{
+public:
+	FEBiphasicInterface() {}
+	virtual ~FEBiphasicInterface() {}
+
+public:
+	virtual double GetReferentialSolidVolumeFraction(const FEMaterialPoint& mp) { return 0.0; }
+
+	// TODO: These are only used by multiphasic materials. Perhapse move to separate interface class? 
+	//! solid referential apparent density
+	virtual double SolidReferentialApparentDensity(FEMaterialPoint& pt) { return 0.0; }
+
+	//! solid referential volume fraction
+	virtual double SolidReferentialVolumeFraction(FEMaterialPoint& pt) { return 0.0; };
+    
+    virtual double TangentSRVFStrain(FEMaterialPoint& pt) { return 0.0; }
+
+	// TODO: This is a bit of a hack to get the fluid pressure. 
+	virtual double GetActualFluidPressure(const FEMaterialPoint& pt) { return 0.0; }
+};
+
+//-----------------------------------------------------------------------------
 //! Base class for biphasic materials.
 
-class FEBIOMIX_API FEBiphasic : public FEMaterial
+class FEBIOMIX_API FEBiphasic : public FEMaterial, public FEBiphasicInterface
 {
 public:
 	FEBiphasic(FEModel* pfem);
 	
 	// returns a pointer to a new material point object
-	FEMaterialPoint* CreateMaterialPointData() override;
+	FEMaterialPointData* CreateMaterialPointData() override;
 
 	// Get the elastic component (overridden from FEMaterial)
 	FEElasticMaterial* GetElasticMaterial() { return m_pSolid; }
@@ -96,18 +119,33 @@ public:
 	//! calculate stress at material point
 	mat3ds Stress(FEMaterialPoint& pt);
 	
+    //! calculate secant stress at material point
+    mat3ds SecantStress(FEMaterialPoint& pt);
+    
 	//! calculate tangent stiffness at material point
-	tens4ds Tangent(FEMaterialPoint& pt);
+	tens4dmm Tangent(FEMaterialPoint& pt);
 
+    //! calculate secant tangent stiffness at material point
+    tens4dmm SecantTangent(FEMaterialPoint& pt);
+    
 	//! return the permeability tensor as a matrix
 	void Permeability(double k[3][3], FEMaterialPoint& pt);
 
 	//! return the permeability as a tensor
 	mat3ds Permeability(FEMaterialPoint& pt);
 
+    //! return tangent of permeability with strain
+    tens4dmm Tangent_Permeability_Strain(FEMaterialPoint& mp);
+    
+    //! return secant tangent of permeability with strain
+    tens4dmm SecantTangent_Permeability_Strain(FEMaterialPoint& mp);
+    
 	//! return the permeability property
 	FEHydraulicPermeability* GetPermeability() { return m_pPerm; }
 	
+    //! return the material permeability property
+    mat3ds MaterialPermeability(FEMaterialPoint& mp, const mat3ds E);
+    
 	//! calculate actual fluid pressure
 	double Pressure(FEMaterialPoint& pt);
 
@@ -129,6 +167,26 @@ public:
 	//! Get the active momentum supply
 	FEActiveMomentumSupply* GetActiveMomentumSupply() { return m_pAmom; }
 
+public: // overridden from FEBiphasicInterface
+
+	double GetReferentialSolidVolumeFraction(const FEMaterialPoint& mp) override {
+		const FEBiphasicMaterialPoint* pt = (mp.ExtractData<FEBiphasicMaterialPoint>());
+		return pt->m_phi0t;
+	}
+
+	double GetActualFluidPressure(const FEMaterialPoint& mp) override { 
+		const FEBiphasicMaterialPoint* pt = (mp.ExtractData<FEBiphasicMaterialPoint>());
+		return pt->m_pa;
+	}
+
+    //! evaluate and return solid referential volume fraction
+    double SolidReferentialVolumeFraction(FEMaterialPoint& mp) override {
+        double phisr = m_phi0(mp);
+        FEBiphasicMaterialPoint* bp = (mp.ExtractData<FEBiphasicMaterialPoint>());
+        bp->m_phi0 = bp->m_phi0t = phisr;
+        return phisr;
+    };
+    
 public: // material parameters
 	double						m_rhoTw;	//!< true fluid density
 	FEParamDouble               m_phi0;		//!< solid volume fraction in reference configuration

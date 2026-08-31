@@ -27,13 +27,15 @@ SOFTWARE.*/
 
 
 #pragma once
-#include "FEBiphasicSolver.h"
+#include <FECore/FENewtonSolver.h>
+#include <FEBioMech/FERigidSolver.h>
 #include <FECore/FEDofList.h>
+#include "febiomix_api.h"
 
 //-----------------------------------------------------------------------------
 // This class adds additional functionality to the FESolidSolver2 to solve
 // solute problems. 
-class FEBIOMIX_API FEMultiphasicSolver : public FESolidSolver2
+class FEBIOMIX_API FEMultiphasicSolver : public FENewtonSolver
 {
 public:
 	//! con/descructor
@@ -55,12 +57,24 @@ public:
 	//! serialize data to/from dump file
 	void Serialize(DumpStream& ar) override;
 
+	//! Generate warnings if needed
+	void SolverWarnings();
+
+	//! preferred matrix type should be unsymmetric.
+	Matrix_Type PreferredMatrixType() const override { return REAL_UNSYMMETRIC; };
+
 public:
+	void Update(vector<double>& ui) override;
+
 	//! update contact
 	void UpdateModel() override;
 
+	//! Update EAS
+	void UpdateEAS(vector<double>& ui);
+	void UpdateIncrementsEAS(vector<double>& ui, const bool binc);
+
 	//! update kinematics
-	void UpdateKinematics(vector<double>& ui) override;
+	virtual void UpdateKinematics(vector<double>& ui);
 
 	//! Update poroelastic data
 	void UpdatePoro(vector<double>& ui);
@@ -69,15 +83,19 @@ public:
 	void UpdateSolute(vector<double>& ui);
 
 public:
-	//! Calculates concentrated nodal forces (overridden from FESolidSolver2)
-	//! (This function is called from FESolidSolver2::PrepStep)
-	void NodalLoads(FEGlobalVector& F, const FETimeInfo& tp) override;
-
 	//! Calculates residual (overridden from FESolidSolver2)
 	bool Residual(vector<double>& R) override;
 
 	//! calculates the global stiffness matrix (overridden from FESolidSolver2)
 	bool StiffnessMatrix() override;
+
+	void ContactForces(FEGlobalVector& R);
+
+	void ContactStiffness(FELinearSystem& LS);
+
+	void NonLinearConstraintForces(FEGlobalVector& R, const FETimeInfo& tp);
+
+	void NonLinearConstraintStiffness(FELinearSystem& LS, const FETimeInfo& tp);
 
 protected:
 	void GetDisplacementData(vector<double>& di, vector<double>& ui);
@@ -85,6 +103,7 @@ protected:
 	void GetConcentrationData(vector<double>& ci, vector<double>& ui, const int sol);
 
 public:	// Parameters
+	double	m_Dtol;				//!< displacement tolerance
 	double	m_Ctol;				//!< concentration tolerance
 	double	m_Ptol;				//!< pressure tolerance
 	bool	m_forcePositive;	//!< force conentrations to remain positive
@@ -93,7 +112,11 @@ public:
 	// equation numbers
 	int		m_ndeq;				//!< number of equations related to displacement dofs
 	int		m_npeq;				//!< number of equations related to pressure dofs
+	int		m_nreq;			//!< start of rigid body equations
 	vector<int>		m_nceq;	//!< number of equations related to concentration dofs
+
+	vector<double> m_Fr;	//!< nodal reaction forces
+	vector<double> m_Uip;	//!< previous converged displacement increment
 
 	// poro data
 	vector<double>	m_di;	//!< displacement increment vector
@@ -106,11 +129,26 @@ public:
 	vector< vector<double> >	m_Ci;	//!< Total concentration vector for iteration
 
 protected:
-	int	m_dofP;	//!< pressure dof index
-    int	m_dofQ;	//!< shell pressure dof index
-    int	m_dofC;	//!< concentration dof index
-    int	m_dofD;	//!< shell concentration dof
-    
+	FEDofList	m_dofU, m_dofV;
+	FEDofList	m_dofRQ;
+	FEDofList	m_dofSU, m_dofSV, m_dofSA;
+	int	m_dofP;		//!< pressure dof index
+	int	m_dofSP;	//!< shell pressure dof index
+	int	m_dofC;		//!< concentration dof index
+	int	m_dofSC;	//!< shell concentration dof
+
+	FERigidSolverNew	m_rigidSolver;
+
+protected:
+	// obsolete parameters
+	double  m_rhoi = -2;
+	double	m_alpha = 1;
+	double	m_beta = 0.25;
+	double	m_gamma = 0.5;
+	bool	m_logSolve = false;
+	int		m_arcLength = 0;
+	double	m_al_scale = 0;
+
 	// declare the parameter list
 	DECLARE_FECORE_CLASS();
 };

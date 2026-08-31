@@ -29,10 +29,10 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEReactiveViscoelastic.h"
 #include "FEElasticMixture.h"
+#include "FEElasticFiberMaterial.h"
 #include "FEFiberMaterialPoint.h"
 #include "FEScaledElasticMaterial.h"
 #include <FECore/FECoreKernel.h>
-#include <FECore/FEModel.h>
 #include <FECore/log.h>
 #include <limits>
 
@@ -45,8 +45,8 @@ SOFTWARE.*/
 // Material parameters for the FEMultiphasic material
 BEGIN_FECORE_CLASS(FEReactiveViscoelasticMaterial, FEElasticMaterial)
     ADD_PARAMETER(m_wmin , FE_RANGE_CLOSED(0.0, 1.0), "wmin");
-    ADD_PARAMETER(m_btype, FE_RANGE_CLOSED(1,2), "kinetics");
-    ADD_PARAMETER(m_ttype, FE_RANGE_CLOSED(0,2), "trigger");
+    ADD_PARAMETER(m_btype, FE_RANGE_CLOSED(1,2), "kinetics")->setEnums("(invalid)\0Type I\0Type II\0");
+    ADD_PARAMETER(m_ttype, FE_RANGE_CLOSED(0,2), "trigger")->setEnums("any strain\0distortional\0dilatational\0");
     ADD_PARAMETER(m_emin , FE_RANGE_GREATER_OR_EQUAL(0.0), "emin");
 
 	// set material properties
@@ -62,7 +62,7 @@ END_FECORE_CLASS();
 FEReactiveViscoelasticMaterial::FEReactiveViscoelasticMaterial(FEModel* pfem) : FEElasticMaterial(pfem)
 {
     m_wmin = 0;
-    m_btype = 0;
+    m_btype = 1;
     m_ttype = 0;
     m_emin = 0;
     
@@ -75,6 +75,7 @@ FEReactiveViscoelasticMaterial::FEReactiveViscoelasticMaterial(FEModel* pfem) : 
     
     m_pDmg = nullptr;
     m_pFtg = nullptr;
+    m_pRPD = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -100,22 +101,23 @@ bool FEReactiveViscoelasticMaterial::Init()
     
     m_pDmg = dynamic_cast<FEDamageMaterial*>(m_pBase);
     m_pFtg = dynamic_cast<FEReactiveFatigue*>(m_pBase);
+    m_pRPD = dynamic_cast<FEReactivePlasticDamage*>(m_pBase);
 
     return FEElasticMaterial::Init();
 }
 
 //-----------------------------------------------------------------------------
 //! Create material point data  arrayfor this material
-FEMaterialPoint* FEReactiveViscoelasticMaterial::CreateMaterialPointData()
+FEMaterialPointData* FEReactiveViscoelasticMaterial::CreateMaterialPointData()
 {
     FEReactiveViscoelasticMaterialPoint* pt = new FEReactiveViscoelasticMaterialPoint();
     // create materal point for strong bond (base) material
-    FEMaterialPoint* pbase = m_pBase->CreateMaterialPointData();
+    FEMaterialPoint* pbase = new FEMaterialPoint(m_pBase->CreateMaterialPointData());
     pt->AddMaterialPoint(pbase);
 
     // create materal point for weak bond material
     FEReactiveVEMaterialPoint* pbond = new FEReactiveVEMaterialPoint(m_pBond->CreateMaterialPointData());
-    pt->AddMaterialPoint(pbond);
+    pt->AddMaterialPoint(new FEMaterialPoint(pbond));
     
 	return pt;
 }
@@ -134,11 +136,11 @@ FEMaterialPoint* FEReactiveViscoelasticMaterial::GetBaseMaterialPoint(FEMaterial
     FEMaterialPoint* sb = rvp.GetPointData(0);
     sb->m_elem = mp.m_elem;
     sb->m_index = mp.m_index;
-    
+	sb->m_rt = mp.m_rt;
+	sb->m_r0 = mp.m_r0;
+
     // copy the elastic material point data to the strong bond component
     FEElasticMaterialPoint& epi = *sb->ExtractData<FEElasticMaterialPoint>();
-    epi.m_rt = ep.m_rt;
-    epi.m_r0 = mp.m_r0;
     epi.m_F = ep.m_F;
     epi.m_J = ep.m_J;
     epi.m_v = ep.m_v;
@@ -162,11 +164,11 @@ FEMaterialPoint* FEReactiveViscoelasticMaterial::GetBondMaterialPoint(FEMaterial
     FEMaterialPoint* wb = rvp.GetPointData(1);
     wb->m_elem = mp.m_elem;
     wb->m_index = mp.m_index;
-    
+	wb->m_rt = mp.m_rt;
+	wb->m_r0 = mp.m_r0;
+
     // copy the elastic material point data to the weak bond component
     FEElasticMaterialPoint& epi = *wb->ExtractData<FEElasticMaterialPoint>();
-    epi.m_rt = ep.m_rt;
-    epi.m_r0 = mp.m_r0;
     epi.m_F = ep.m_F;
     epi.m_J = ep.m_J;
     epi.m_v = ep.m_v;
@@ -252,7 +254,7 @@ double FEReactiveViscoelasticMaterial::BreakingBondMassFraction(FEMaterialPoint&
     double w = 0;
     
     // current time
-    double time = GetFEModel()->GetTime().currentTime;
+    double time = CurrentTime();
     double dtv = time - pt.m_v[ig];
 
     switch (m_btype) {
@@ -303,8 +305,8 @@ double FEReactiveViscoelasticMaterial::ReformingBondMassFraction(FEMaterialPoint
     // get current number of generations
     int ng = (int)pt.m_Uv.size();
     
-    double f = (!pt.m_wv.empty()) ? pt.m_wv.back() : 1;
-    
+    double f = 1;
+
     for (int ig=0; ig<ng-1; ++ig)
     {
         // evaluate deformation gradient when this generation starts breaking
@@ -337,7 +339,7 @@ mat3ds FEReactiveViscoelasticMaterial::StressStrongBonds(FEMaterialPoint& mp)
 //! Stress function for weak bonds
 mat3ds FEReactiveViscoelasticMaterial::StressWeakBonds(FEMaterialPoint& mp)
 {
-    double dt = GetFEModel()->GetTime().timeIncrement;
+    double dt = CurrentTime();
     if (dt == 0) return mat3ds(0, 0, 0, 0, 0, 0);
     
     FEMaterialPoint& wb = *GetBondMaterialPoint(mp);
@@ -349,7 +351,10 @@ mat3ds FEReactiveViscoelasticMaterial::StressWeakBonds(FEMaterialPoint& mp)
     FEElasticMaterialPoint& ep = *wb.ExtractData<FEElasticMaterialPoint>();
     
     // get fiber material point data (if it exists)
-    FEFiberMaterialPoint* fp = pt.ExtractData<FEFiberMaterialPoint>();
+	// NOTE: I'm concerned that this will not always find the correct fiber material point. For instance
+	//       if the bond material is a mixture of multiple fiber materials, then this will only find the first one.
+	//       (see cf10 test problem).
+    FEFiberMaterialPoint* fp = wb.ExtractData<FEFiberMaterialPoint>();
     
     mat3ds D = ep.RateOfDeformation();
     
@@ -377,7 +382,7 @@ mat3ds FEReactiveViscoelasticMaterial::StressWeakBonds(FEMaterialPoint& mp)
             // evaluate bond mass fraction for this generation
             ep.m_F = pt.m_Uv[ig];
             ep.m_J = pt.m_Jv[ig];
-            w = BreakingBondMassFraction(wb, ig, D);
+            w = BreakingBondMassFraction(wb, ig, D)*pt.m_wv[ig];
             // evaluate relative deformation gradient for this generation
             if (ig > 0) {
                 ep.m_F = F*pt.m_Uv[ig-1].inverse();
@@ -437,7 +442,7 @@ tens4ds FEReactiveViscoelasticMaterial::TangentWeakBonds(FEMaterialPoint& mp)
     FEElasticMaterialPoint& ep = *wb.ExtractData<FEElasticMaterialPoint>();
 
     // get fiber material point data (if it exists)
-    FEFiberMaterialPoint* fp = pt.ExtractData<FEFiberMaterialPoint>();
+    FEFiberMaterialPoint* fp = wb.ExtractData<FEFiberMaterialPoint>();
     
     mat3ds D = ep.RateOfDeformation();
     
@@ -465,7 +470,7 @@ tens4ds FEReactiveViscoelasticMaterial::TangentWeakBonds(FEMaterialPoint& mp)
             // evaluate bond mass fraction for this generation
             ep.m_F = pt.m_Uv[ig];
             ep.m_J = pt.m_Jv[ig];
-            w = BreakingBondMassFraction(wb, ig, D);
+            w = BreakingBondMassFraction(wb, ig, D)*pt.m_wv[ig];
             // evaluate relative deformation gradient for this generation
             if (ig > 0) {
                 ep.m_F = F*pt.m_Uv[ig-1].inverse();
@@ -514,7 +519,7 @@ double FEReactiveViscoelasticMaterial::StrongBondSED(FEMaterialPoint& mp)
 //! strain energy density function in weak bonds
 double FEReactiveViscoelasticMaterial::WeakBondSED(FEMaterialPoint& mp)
 {
-    double dt = GetFEModel()->GetTime().timeIncrement;
+    double dt = CurrentTime();
     if (dt == 0) return 0;
     
     FEMaterialPoint& wb = *GetBondMaterialPoint(mp);
@@ -526,7 +531,7 @@ double FEReactiveViscoelasticMaterial::WeakBondSED(FEMaterialPoint& mp)
     FEElasticMaterialPoint& ep = *wb.ExtractData<FEElasticMaterialPoint>();
 
     // get fiber material point data (if it exists)
-    FEFiberMaterialPoint* fp = pt.ExtractData<FEFiberMaterialPoint>();
+    FEFiberMaterialPoint* fp = wb.ExtractData<FEFiberMaterialPoint>();
     
     // get the viscous point data
     mat3ds D = ep.RateOfDeformation();
@@ -554,7 +559,7 @@ double FEReactiveViscoelasticMaterial::WeakBondSED(FEMaterialPoint& mp)
             // evaluate bond mass fraction for this generation
             ep.m_F = pt.m_Uv[ig];
             ep.m_J = pt.m_Jv[ig];
-            w = BreakingBondMassFraction(wb, ig, D);
+            w = BreakingBondMassFraction(wb, ig, D)*pt.m_wv[ig];
             // evaluate relative deformation gradient for this generation
             if (ig > 0) {
                 ep.m_F = F*pt.m_Uv[ig-1].inverse();
@@ -619,11 +624,11 @@ void FEReactiveViscoelasticMaterial::CullGenerations(FEMaterialPoint& mp)
     // always check oldest generation
     ep.m_F = pt.m_Uv[0];
     ep.m_J = pt.m_Jv[0];
-    double w0 = BreakingBondMassFraction(mp, 0, D);
+    double w0 = BreakingBondMassFraction(mp, 0, D)*pt.m_wv[0];
     if (w0 < m_wmin) {
         ep.m_F = pt.m_Uv[1];
         ep.m_J = pt.m_Jv[1];
-        double w1 = BreakingBondMassFraction(mp, 1, D);
+        double w1 = BreakingBondMassFraction(mp, 1, D)*pt.m_wv[1];
         pt.m_v[1] = (w0*pt.m_v[0] + w1*pt.m_v[1])/(w0+w1);
         pt.m_Uv[1] = (pt.m_Uv[0]*w0 + pt.m_Uv[1]*w1)/(w0+w1);
         pt.m_Jv[1] = pt.m_Uv[1].det();
@@ -654,6 +659,10 @@ void FEReactiveViscoelasticMaterial::UpdateSpecializedMaterialPoints(FEMaterialP
     m_pBase->UpdateSpecializedMaterialPoints(sb, tp);
     m_pBond->UpdateSpecializedMaterialPoints(wb, tp);
     
+    // if the this material is a fiber and if the fiber is in compression, skip this update
+    if ((dynamic_cast<FEElasticFiberMaterial*>(m_pBase)) && (dynamic_cast<FEElasticFiberMaterial*>(m_pBond)))
+        if ((m_pBase->Stress(mp)).norm() == 0) return;
+    
     // get the reactive viscoelastic point data
     FEReactiveVEMaterialPoint& pt = *wb.ExtractData<FEReactiveVEMaterialPoint>();
     
@@ -672,11 +681,8 @@ void FEReactiveViscoelasticMaterial::UpdateSpecializedMaterialPoints(FEMaterialP
             pt.m_Uv.push_back(Uv);
             pt.m_Jv.push_back(Jv);
             if (m_pWCDF) {
-                pt.m_Et = ScalarStrain(pt);
-                if (pt.m_Et > pt.m_Em)
-                    pt.m_wv.push_back(m_pWCDF->cdf(pt.m_Et));
-                else
-                    pt.m_wv.push_back(m_pWCDF->cdf(pt.m_Em));
+                pt.m_Et = ScalarStrain(mp);
+                pt.m_wv.push_back(m_pWCDF->brf(mp,pt.m_Et));
             }
             else pt.m_wv.push_back(1);
             double f = (!pt.m_v.empty()) ? ReformingBondMassFraction(wb) : 1;
@@ -689,11 +695,8 @@ void FEReactiveViscoelasticMaterial::UpdateSpecializedMaterialPoints(FEMaterialP
         pt.m_Uv.back() = Uv;
         pt.m_Jv.back() = Jv;
         if (m_pWCDF) {
-            pt.m_Et = ScalarStrain(pt);
-            if (pt.m_Et > pt.m_Em)
-                pt.m_wv.back() = m_pWCDF->cdf(pt.m_Et);
-            else
-                pt.m_wv.back() = m_pWCDF->cdf(pt.m_Em);
+            pt.m_Et = ScalarStrain(mp);
+            pt.m_wv.back() = m_pWCDF->brf(mp,pt.m_Et);
         }
         pt.m_f.back() = ReformingBondMassFraction(wb);
     }
@@ -760,5 +763,16 @@ double FEReactiveViscoelasticMaterial::Damage(FEMaterialPoint& mp)
     double D = 0;
     if (m_pDmg) D = m_pDmg->Damage(*GetBaseMaterialPoint(mp));
     else if (m_pFtg) D = m_pFtg->Damage(*GetBaseMaterialPoint(mp));
+    else if (m_pRPD) {
+        FEMaterialPoint& pt = *GetBaseMaterialPoint(mp);
+        const FEReactiveMaterialPoint* ppd = pt.ExtractData<FEReactiveMaterialPoint>();
+        D = ppd->BrokenBonds();
+    }
     return D;
+}
+
+void FEReactiveViscoelasticMaterial::Serialize(DumpStream& ar)
+{
+	FEElasticMaterial::Serialize(ar);
+	ar & m_nmax;
 }

@@ -27,9 +27,10 @@ SOFTWARE.*/
 
 
 #pragma once
-#include <FECore/FEPointFunction.h>
+#include <FECore/PointCurve.h>
 #include <functional>
 #include <FECore/NodeDataRecord.h>
+#include <FECore/ElementDataRecord.h>
 
 //-------------------------------------------------------------------------------------------------
 // The FEDataSource class is used by the FEObjectiveFunction to query model data and evaluate it
@@ -65,9 +66,13 @@ public:
 	
 	// Set the model parameter name
 	void SetParameterName(const std::string& name);
+	
+	std::string GetParameterName() const { return m_param; }
 
 	// set the ordinate name
 	void SetOrdinateName(const std::string& name);
+
+	std::string GetOrdinateName() const { return m_ord; }
 
 	// Initialize data
 	bool Init() override;
@@ -90,7 +95,7 @@ private:
 	string	m_ord;				//!< name of ordinate parameter
 	std::function<double()>	m_fx;				//!< pointer to ordinate value
 	std::function<double()>	m_fy;				//!< pointer to variable data
-	FEPointFunction		m_rf;	//!< reaction force data
+	PointCurve		m_rf;	//!< reaction force data
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -119,14 +124,13 @@ private:
 	FEDataSource*	m_src;
 };
 
-//-------------------------------------------------------------------------------------------------
-class FEDataFilterSum : public FEDataSource
+class FENodeDataFilterSum : public FEDataSource
 {
 public:
-	FEDataFilterSum(FEModel* fem);
-	~FEDataFilterSum();
+	FENodeDataFilterSum(FEModel* fem);
+	~FENodeDataFilterSum();
 
-	void SetData(FENodeLogData* data, FENodeSet* nodeSet);
+	void SetData(FELogNodeData* data, FENodeSet* nodeSet);
 
 	// Initialize data
 	bool Init() override;
@@ -143,7 +147,34 @@ private:
 	void update();
 
 private:
-	FENodeLogData*	m_data;
+	FELogNodeData*	m_data;
 	FENodeSet*		m_nodeSet;
-	FEPointFunction		m_rf;
+	PointCurve		m_rf;
+};
+
+class FEElemDataFilterSum : public FEDataSource
+{
+public:
+	FEElemDataFilterSum(FEModel* fem);
+	~FEElemDataFilterSum();
+
+	void SetData(FELogElemSource* data, FEElementSet* elemSet);
+
+	// Initialize data
+	bool Init() override;
+
+	// reset data
+	void Reset() override;
+
+	// evaluate data source at x
+	double Evaluate(double x) override;
+
+private:
+	static bool update(FEModel* pmdl, unsigned int nwhen, void* pd);
+	void update();
+
+private:
+	FELogElemSource*	m_data;
+	FEElementSet*	m_elemSet;
+	PointCurve		m_rf;
 };

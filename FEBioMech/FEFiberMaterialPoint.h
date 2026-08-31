@@ -28,15 +28,16 @@ SOFTWARE.*/
 
 #pragma once
 #include "FECore/FEMaterial.h"
+#include "febiomech_api.h"
 
 //-----------------------------------------------------------------------------
 // Define a material point that stores the fiber pre-stretch
-class FEFiberMaterialPoint : public FEMaterialPoint
+class FEBIOMECH_API FEFiberMaterialPoint : public FEMaterialPointData
 {
 public:
-    FEFiberMaterialPoint(FEMaterialPoint *pt) : FEMaterialPoint(pt) {}
+	FEFiberMaterialPoint(FEMaterialPointData* pt);
     
-    FEMaterialPoint* Copy();
+	FEMaterialPointData* Copy();
     
     void Init();
     
@@ -51,4 +52,5 @@ public:
 public:
     mat3ds  m_Us;   //!< pre-stretch tensor for fiber
     bool    m_bUs;  //!< flag for pre-stretch
+	int		m_index = -1;	//!< used as index in CDF material
 };

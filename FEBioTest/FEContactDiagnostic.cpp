@@ -63,11 +63,14 @@ void FEContactDiagnostic::print_matrix(DenseMatrix& m)
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-FEContactDiagnostic::FEContactDiagnostic(FEModel& fem) : FEDiagnostic(fem)
+FEContactDiagnostic::FEContactDiagnostic(FEModel* fem) : FEDiagnostic(fem)
 {
-	FEAnalysis* pstep = new FEAnalysis(&fem);
-    fem.AddStep(pstep);
-    fem.SetCurrentStep(pstep);
+	// make sure the correct module is active
+	fem->SetActiveModule("solid");
+
+	FEAnalysis* pstep = new FEAnalysis(fem);
+    fem->AddStep(pstep);
+    fem->SetCurrentStep(pstep);
 }
 
 FEContactDiagnostic::~FEContactDiagnostic()
@@ -98,7 +101,7 @@ bool FEContactDiagnostic::Run()
 	int neq = solver.m_neq;
 	vector<double> Fd(neq, 0.0);
 	vector<double> ui(neq, 0.0);
-	FELinearSystem LS(&solver, K, Fd, ui, true);
+	FELinearSystem LS(&fem, K, Fd, ui, true);
 
 	// build the stiffness matrix
 	K0.Zero();

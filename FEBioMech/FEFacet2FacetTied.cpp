@@ -28,7 +28,7 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FEFacet2FacetTied.h"
-#include "FECore/FEModel.h"
+#include "FECore/FEMesh.h"
 #include "FECore/FEClosestPointProjection.h"
 #include "FECore/FEGlobalMatrix.h"
 #include <FECore/FELinearSystem.h>
@@ -37,6 +37,7 @@ SOFTWARE.*/
 //-----------------------------------------------------------------------------
 // Define tied interface parameters
 BEGIN_FECORE_CLASS(FEFacet2FacetTied, FEContactInterface)
+	ADD_PARAMETER(m_laugon , "laugon")->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0");
 	ADD_PARAMETER(m_atol   , "tolerance"       );
 	ADD_PARAMETER(m_eps    , "penalty"         );
 	ADD_PARAMETER(m_naugmin, "minaug"          );
@@ -53,6 +54,16 @@ FEFacetTiedSurface::Data::Data()
 	m_Lm = vec3d(0,0,0);
 	m_rs = vec2d(0,0);
 	m_pme = (FESurfaceElement*) 0;
+}
+
+void FEFacetTiedSurface::Data::Init()
+{
+	FEContactMaterialPoint::Init();
+	m_vgap = vec3d(0, 0, 0);
+	m_vgap0 = vec3d(0, 0, 0);
+	m_Lm = vec3d(0, 0, 0);
+	m_rs = vec2d(0, 0);
+	m_pme = (FESurfaceElement*)0;
 }
 
 void FEFacetTiedSurface::Data::Serialize(DumpStream& ar)
@@ -187,16 +198,15 @@ FEFacet2FacetTied::FEFacet2FacetTied(FEModel* pfem) : FEContactInterface(pfem), 
 //! build the matrix profile for use in the stiffness matrix
 void FEFacet2FacetTied::BuildMatrixProfile(FEGlobalMatrix& K)
 {
-	FEModel& fem = *GetFEModel();
-	FEMesh& mesh = fem.GetMesh();
+	FEMesh& mesh = GetMesh();
 
 	// get the DOFS
-	const int dof_X = fem.GetDOFIndex("x");
-	const int dof_Y = fem.GetDOFIndex("y");
-	const int dof_Z = fem.GetDOFIndex("z");
-	const int dof_RU = fem.GetDOFIndex("Ru");
-	const int dof_RV = fem.GetDOFIndex("Rv");
-	const int dof_RW = fem.GetDOFIndex("Rw");
+	const int dof_X = GetDOFIndex("x");
+	const int dof_Y = GetDOFIndex("y");
+	const int dof_Z = GetDOFIndex("z");
+	const int dof_RU = GetDOFIndex("Ru");
+	const int dof_RV = GetDOFIndex("Rv");
+	const int dof_RW = GetDOFIndex("Rw");
 
 	vector<int> lm(6*FEElement::MAX_NODES*2);
 
@@ -306,6 +316,9 @@ void FEFacet2FacetTied::ProjectSurface(FEFacetTiedSurface& ss, FEFacetTiedSurfac
 	cpp.SetTolerance(m_stol);
 	cpp.Init();
 
+	// let's count contact pairs
+	int contacts = 0;
+
 	// loop over all primary elements
 	for (int i=0; i<ss.Elements(); ++i)
 	{
@@ -341,9 +354,18 @@ void FEFacet2FacetTied::ProjectSurface(FEFacetTiedSurface& ss, FEFacetTiedSurfac
 				pt.m_vgap = x - q;
 
 				pt.m_gap = pt.m_vgap.norm();
+
+				contacts++;
 			}
-			else pt.m_pme = 0;
+			else pt.m_pme = nullptr;
 		}
+	}
+
+	// if we found no contact pairs, let's report this since this is probably not the user's intention
+	if (contacts == 0)
+	{
+		std::string name = GetName();
+		feLogWarning("No contact pairs found for tied interface \"%s\".\nThis contact interface may not have any effect.", name.c_str());
 	}
 }
 
@@ -635,7 +657,7 @@ void FEFacet2FacetTied::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp
 bool FEFacet2FacetTied::Augment(int naug, const FETimeInfo& tp)
 {
 	// make sure we need to augment
-	if (m_laugon != 1) return true;
+	if (m_laugon != FECore::AUGLAG_METHOD) return true;
 
 	// calculate initial norms
 	double normL0 = 0;

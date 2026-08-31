@@ -34,11 +34,13 @@ SOFTWARE.*/
 #include <FECore/DumpStream.h>
 #include <FECore/FEGlobalMatrix.h>
 #include <FECore/FELinearSystem.h>
+#include <FECore/FEModel.h>
 #include "FEBioFluid.h"
 
 //-----------------------------------------------------------------------------
 // Define sliding interface parameters
 BEGIN_FECORE_CLASS(FETiedFluidInterface, FEContactInterface)
+	ADD_PARAMETER(m_laugon   , "laugon")->setLongName("Enforcement method")->setEnums("PENALTY\0AUGLAG\0");
 	ADD_PARAMETER(m_atol     , "tolerance"          );
 	ADD_PARAMETER(m_gtol     , "gaptol"             );
 	ADD_PARAMETER(m_ptol     , "ptol"               );
@@ -245,8 +247,7 @@ bool FETiedFluidInterface::Init()
 //! build the matrix profile for use in the stiffness matrix
 void FETiedFluidInterface::BuildMatrixProfile(FEGlobalMatrix& K)
 {
-    FEModel& fem = *GetFEModel();
-    FEMesh& mesh = fem.GetMesh();
+    FEMesh& mesh = GetMesh();
     
     vector<int> lm(4*FEElement::MAX_NODES*2);
     
@@ -331,7 +332,7 @@ void FETiedFluidInterface::CalcAutoPressurePenalty(FETiedFluidSurface& s)
         // calculate a penalty
         double eps = AutoPressurePenalty(el, s);
         
-        // assign to integation points of surface element
+        // assign to integration points of surface element
         int nint = el.GaussPoints();
         for (int j=0; j<nint; ++j)
         {
@@ -346,7 +347,7 @@ void FETiedFluidInterface::CalcAutoPressurePenalty(FETiedFluidSurface& s)
 double FETiedFluidInterface::AutoPressurePenalty(FESurfaceElement& el, FETiedFluidSurface& s)
 {
     // get the mesh
-    FEMesh& m = GetFEModel()->GetMesh();
+    FEMesh& m = GetMesh();
     
     // evaluate element surface normal at parametric center
     vec3d t[2];
@@ -355,7 +356,7 @@ double FETiedFluidInterface::AutoPressurePenalty(FESurfaceElement& el, FETiedFlu
     n.unit();
     
     // get the element this surface element belongs to
-    FEElement* pe = el.m_elem[0];
+    FEElement* pe = el.m_elem[0].pe;
     if (pe == 0) return 0.0;
     
     // get the material
@@ -384,7 +385,7 @@ double FETiedFluidInterface::AutoPressurePenalty(FESurfaceElement& el, FETiedFlu
 // Perform initial projection between tied surfaces in reference configuration
 void FETiedFluidInterface::InitialProjection(FETiedFluidSurface& ss, FETiedFluidSurface& ms)
 {
-    FEMesh& mesh = GetFEModel()->GetMesh();
+    FEMesh& mesh = GetMesh();
     FESurfaceElement* pme;
     vec3d r, nu;
     double rs[2];
@@ -460,7 +461,7 @@ void FETiedFluidInterface::InitialProjection(FETiedFluidSurface& ss, FETiedFluid
 // Evaluate gap functions for fluid velocity and fluid pressure
 void FETiedFluidInterface::ProjectSurface(FETiedFluidSurface& ss, FETiedFluidSurface& ms)
 {
-    FEMesh& mesh = GetFEModel()->GetMesh();
+    FEMesh& mesh = GetMesh();
     FESurfaceElement* pme;
     vec3d r;
     
@@ -715,7 +716,7 @@ void FETiedFluidInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo&
         {
             // get the next element
             FESurfaceElement& se = ss.Element(i);
-            FEElement* sse = se.m_elem[0];
+            FEElement* sse = se.m_elem[0].pe;
 
             // get nr of nodes and integration points
             int nseln = se.Nodes();
@@ -894,7 +895,7 @@ void FETiedFluidInterface::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo&
 bool FETiedFluidInterface::Augment(int naug, const FETimeInfo& tp)
 {
     // make sure we need to augment
-	if (m_laugon != 1) return true;
+	if (m_laugon != FECore::AUGLAG_METHOD) return true;
 
     int i;
     vec3d Ln;
@@ -1018,4 +1019,8 @@ void FETiedFluidInterface::Serialize(DumpStream &ar)
 	// serialize element pointers
 	SerializeElementPointers(m_ss, m_ms, ar);
 	SerializeElementPointers(m_ms, m_ss, ar);
+    
+    if (ar.IsShallow()) return;
+    ar & m_pfluid;
+    ar & m_dofWE;
 }

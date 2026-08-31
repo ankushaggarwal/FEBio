@@ -53,7 +53,7 @@ bool FEVolumeSurface::Init()
 	if (FESurface::Init() == false) return false;
 
 	// evaluate the initial volume
-	m_V0 = Volume();
+	m_V0 = CalculateSurfaceVolume(*this);
 	m_Vt = m_V0;
 
 	return (m_V0 != 0.0);
@@ -84,51 +84,6 @@ void FEVolumeSurface::Serialize(DumpStream& ar)
 }
 
 //-----------------------------------------------------------------------------
-//! Calculate the initial volume
-double FEVolumeSurface::Volume()
-{
-	// get the mesh
-	FEMesh& mesh = *GetMesh();
-
-	// loop over all elements
-	double vol = 0.0;
-	int NE = Elements();
-	vec3d x[FEElement::MAX_NODES];
-	for (int i=0; i<NE; ++i)
-	{
-		// get the next element
-		FESurfaceElement& el = Element(i);
-
-		// get the nodal coordinates
-		int neln = el.Nodes();
-		for (int j=0; j<neln; ++j) x[j] = mesh.Node(el.m_node[j]).m_rt;
-
-		// loop over integration points
-		double* w = el.GaussWeights();
-		int nint = el.GaussPoints();
-		for (int n=0; n<nint; ++n)
-		{
-			// evaluate the position vector at this point
-			vec3d r = el.eval(x, n);
-
-			// calculate the tangent vectors
-			double* Gr = el.Gr(n);
-			double* Gs = el.Gs(n);
-			vec3d dxr(0,0,0), dxs(0,0,0);
-			for (int j=0; j<neln; ++j) 
-			{
-				dxr += x[j]*Gr[j];
-				dxs += x[j]*Gs[j];
-			}
-
-			// update volume
-			vol += w[n]*(r*(dxr^dxs));
-		}
-	}
-	return vol/3.0;
-}
-
-//-----------------------------------------------------------------------------
 BEGIN_FECORE_CLASS(FEVolumeConstraint, FESurfaceConstraint);
 	ADD_PARAMETER(m_blaugon, "laugon" ); 
 	ADD_PARAMETER(m_atol   , "augtol" );
@@ -137,17 +92,25 @@ END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
 //! constructor. Set default parameter values
-FEVolumeConstraint::FEVolumeConstraint(FEModel* pfem) : FESurfaceConstraint(pfem), m_s(pfem)
+FEVolumeConstraint::FEVolumeConstraint(FEModel* pfem) : FESurfaceConstraint(pfem)
 {
+	m_s = new FEVolumeSurface(pfem);
+
 	m_eps = 0.0;
 	m_atol = 0.0;
 	m_blaugon = false;
 	m_binit = false;	// will be set to true during activation
 
 	// get the degrees of freedom
-	m_dofX = pfem->GetDOFIndex("x");
-	m_dofY = pfem->GetDOFIndex("y");
-	m_dofZ = pfem->GetDOFIndex("z");
+	m_dofX = (pfem ? pfem->GetDOFIndex("x") : -1);
+	m_dofY = (pfem ? pfem->GetDOFIndex("y") : -1);
+	m_dofZ = (pfem ? pfem->GetDOFIndex("z") : -1);
+}
+
+//-----------------------------------------------------------------------------
+FEVolumeConstraint::~FEVolumeConstraint()
+{
+	delete m_s;
 }
 
 //-----------------------------------------------------------------------------
@@ -160,14 +123,26 @@ void FEVolumeConstraint::CopyFrom(FENLConstraint* plc)
 	GetParameterList() = vc.GetParameterList();
 
 	// copy nodes
-	m_s.CopyFrom(vc.m_s);
+	m_s->CopyFrom(*vc.m_s);
 }
 
 //-----------------------------------------------------------------------------
 //! Returns the surface
 FESurface* FEVolumeConstraint::GetSurface()
 {
-	return &m_s;
+	return m_s;
+}
+
+//-----------------------------------------------------------------------------
+double FEVolumeConstraint::EnclosedVolume() const
+{
+	return m_s->m_Vt;
+}
+
+//-----------------------------------------------------------------------------
+double FEVolumeConstraint::Pressure() const
+{
+	return m_s->m_p;
 }
 
 //-----------------------------------------------------------------------------
@@ -178,7 +153,7 @@ void FEVolumeConstraint::Activate()
 	FENLConstraint::Activate();
 
 	// initialize the surface
-	if (m_binit == false) m_s.Init();
+	if (m_binit == false) m_s->Init();
 
 	// set flag that initial volume is calculated
 	m_binit = true;
@@ -212,21 +187,23 @@ void FEVolumeConstraint::UnpackLM(FEElement& el, vector<int>& lm)
 //-----------------------------------------------------------------------------
 void FEVolumeConstraint::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 {
-	FEMesh& mesh = *m_s.GetMesh();
+	FEVolumeSurface& s = *m_s;
+
+	FEMesh& mesh = *s.GetMesh();
 
 	vector<double> fe;
 	vector<int> lm;
 
 	// get the pressure
-	double p = m_s.m_p;
+	double p = s.m_p;
 
 	// loop over all elements
-	int NE = m_s.Elements();
+	int NE = s.Elements();
 	vec3d x[FEElement::MAX_NODES];
 	for (int i=0; i<NE; ++i)
 	{
 		// get the next element
-		FESurfaceElement& el = m_s.Element(i);
+		FESurfaceElement& el = s.Element(i);
 
 		// get the nodal coordinates
 		int neln = el.Nodes();
@@ -276,22 +253,24 @@ void FEVolumeConstraint::LoadVector(FEGlobalVector& R, const FETimeInfo& tp)
 //-----------------------------------------------------------------------------
 void FEVolumeConstraint::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& tp)
 {
-	FEMesh& mesh = *m_s.GetMesh();
+	FEVolumeSurface& s = *m_s;
+
+	FEMesh& mesh = *s.GetMesh();
 
 	// get the pressure
-	double p = m_s.m_p;
+	double p = s.m_p;
 
 	// element stiffness matrix
 	vector<int> lm;
 	vector<double> fe;
 
 	// loop over all elements
-	int NE = m_s.Elements();
+	int NE = s.Elements();
 	vec3d x[FEElement::MAX_NODES];
 	for (int l=0; l<NE; ++l)
 	{
 		// get the next element
-		FESurfaceElement& el = m_s.Element(l);
+		FESurfaceElement& el = s.Element(l);
 
 		FEElementMatrix ke(el);
 
@@ -382,24 +361,26 @@ void FEVolumeConstraint::StiffnessMatrix(FELinearSystem& LS, const FETimeInfo& t
 //-----------------------------------------------------------------------------
 bool FEVolumeConstraint::Augment(int naug, const FETimeInfo& tp)
 {
+	FEVolumeSurface& s = *m_s;
+
 	// make sure we are augmenting
 	if ((m_blaugon == false) || (m_atol <= 0.0)) return true;
 
 	feLog("\nvolume constraint:\n");
 
-	double Dp = m_eps*(m_s.m_Vt - m_s.m_V0);
-	double Lp = m_s.m_p;
+	double Dp = m_eps*(s.m_Vt - s.m_V0);
+	double Lp = s.m_p;
 	double err = fabs(Dp/Lp);
 	feLog("\tpressure: %lg\n", Lp);
 	feLog("\tnorm : %lg (%lg)\n", err, m_atol);
-	feLog("\tvolume ratio: %lg\n", m_s.m_Vt / m_s.m_V0);
+	feLog("\tvolume ratio: %lg\n", s.m_Vt / s.m_V0);
 
 	// check convergence
 	if (err < m_atol) return true;
 
 	// update Lagrange multiplier (and pressure variable)
-	m_s.m_Lp = Lp;
-	m_s.m_p = Lp + Dp;
+	s.m_Lp = Lp;
+	s.m_p = Lp + Dp;
 
 	return false;
 }
@@ -408,7 +389,7 @@ bool FEVolumeConstraint::Augment(int naug, const FETimeInfo& tp)
 void FEVolumeConstraint::Serialize(DumpStream& ar)
 {
 	FENLConstraint::Serialize(ar);
-	m_s.Serialize(ar);
+	m_s->Serialize(ar);
 	ar & m_binit;
 }
 
@@ -421,9 +402,11 @@ void FEVolumeConstraint::Reset()
 // This function is called when the FE model's state needs to be updated.
 void FEVolumeConstraint::Update()
 {
+	FEVolumeSurface& s = *m_s;
+
 	// calculate the current volume
-	m_s.m_Vt = m_s.Volume();
+	s.m_Vt = CalculateSurfaceVolume(s);
 
 	// update pressure variable
-	m_s.m_p = m_s.m_Lp + m_eps*(m_s.m_Vt - m_s.m_V0);
+	s.m_p = s.m_Lp + m_eps*(s.m_Vt - s.m_V0);
 }

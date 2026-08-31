@@ -30,15 +30,16 @@ SOFTWARE.*/
 #include "FECarterHayes.h"
 #include "FEMultiphasic.h"
 #include <FECore/log.h>
+#include <FEBioMech/FEElasticMixture.h>
 
 //-----------------------------------------------------------------------------
 // define the material parameters
 BEGIN_FECORE_CLASS(FECarterHayes, FEElasticMaterial)
-	ADD_PARAMETER(m_E0  , FE_RANGE_GREATER(0.0)         , "E0"   );
-	ADD_PARAMETER(m_rho0, FE_RANGE_GREATER(0.0)         , "rho0" );
+	ADD_PARAMETER(m_E0  , FE_RANGE_GREATER(0.0)         , "E0"   )->setUnits(UNIT_PRESSURE);
+	ADD_PARAMETER(m_rho0, FE_RANGE_GREATER(0.0)         , "rho0" )->setUnits(UNIT_DENSITY);
 	ADD_PARAMETER(m_g   , FE_RANGE_GREATER_OR_EQUAL(0.0), "gamma");
 	ADD_PARAMETER(m_v   , FE_RANGE_RIGHT_OPEN(-1.0, 0.5), "v"    );
-	ADD_PARAMETER(m_sbm , "sbm");
+	ADD_PARAMETER(m_sbm , "sbm")->setEnums("$(sbms)");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -47,7 +48,7 @@ bool FECarterHayes::Init()
 	if (FEElasticMaterial::Init() == false) return false;
 	
 	// get the parent material which must be a multiphasic material
-	FEMultiphasic* pMP = GetAncestor()->ExtractProperty<FEMultiphasic>();
+    FEMultiphasic* pMP = GetAncestor()->ExtractProperty<FEMultiphasic>();
 	if (pMP == 0) {
 		feLogError("Parent material must be multiphasic");
 		return false;
@@ -59,6 +60,21 @@ bool FECarterHayes::Init()
 		feLogError("Invalid value for sbm");
 		return false;
 	}
+
+    FEElasticMaterial* pem = pMP->GetSolid();
+    FEElasticMixture* psm = dynamic_cast<FEElasticMixture*>(pem);
+    if (psm == nullptr) {
+        m_comp = -1;    // in case material is not a solid mixture
+        return true;
+    }
+    
+    for (int i=0; i<psm->Materials(); ++i) {
+        pem = psm->GetMaterial(i);
+        if (pem == this) {
+            m_comp = i;
+            break;
+        }
+    }
 
 	return true;
 }
@@ -73,9 +89,20 @@ void FECarterHayes::Serialize(DumpStream& ar)
 
 //-----------------------------------------------------------------------------
 //! Create material point data
-FEMaterialPoint* FECarterHayes::CreateMaterialPointData()
+FEMaterialPointData* FECarterHayes::CreateMaterialPointData()
 {
 	return new FERemodelingMaterialPoint(new FEElasticMaterialPoint);
+}
+
+//-----------------------------------------------------------------------------
+//! update specialize material point data
+void FECarterHayes::UpdateSpecializedMaterialPoints(FEMaterialPoint& mp, const FETimeInfo& tp)
+{
+    FESolutesMaterialPoint& spt = *mp.ExtractData<FESolutesMaterialPoint>();
+    FERemodelingMaterialPoint* rpt = mp.ExtractData<FERemodelingMaterialPoint>();
+    rpt->m_rhor = spt.m_sbmr[m_lsbm];
+    rpt->m_rhorp = spt.m_sbmrp[m_lsbm];
+    rpt->m_sed = StrainEnergyDensity(mp);
 }
 
 //-----------------------------------------------------------------------------
@@ -161,6 +188,22 @@ tens4ds FECarterHayes::Tangent(FEMaterialPoint& mp)
 	D[5][5] = mu1;
 	
 	return tens4ds(D);
+}
+
+//-----------------------------------------------------------------------------
+//! evaluate referential mass density
+double FECarterHayes::Density(FEMaterialPoint& pt)
+{
+    FERemodelingMaterialPoint* rpt = pt.ExtractData<FERemodelingMaterialPoint>();
+    if (rpt) return rpt->m_rhor;
+    else {
+        FEElasticMixtureMaterialPoint* emp = pt.ExtractData<FEElasticMixtureMaterialPoint>();
+        if (emp) {
+            rpt = emp->GetPointData(m_comp)->ExtractData<FERemodelingMaterialPoint>();
+            if (rpt) return rpt->m_rhor;
+        }
+    }
+    return 0.0;
 }
 
 //-----------------------------------------------------------------------------

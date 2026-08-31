@@ -33,8 +33,6 @@ SOFTWARE.*/
 #include "FEModel.h"
 #include "DumpStream.h"
 
-REGISTER_SUPER_CLASS(FEMeshPartition, FEDOMAIN_ID);
-
 //-----------------------------------------------------------------------------
 FEMeshPartition::FEMeshPartition(int nclass, FEModel* fem) : FECoreBase(fem), m_nclass(nclass)
 {
@@ -153,7 +151,7 @@ bool FEMeshPartition::Init()
 		}
 	}
 
-#ifdef _DEBUG
+#ifndef NDEBUG
 	// make sure all nodes are assigned a local index
 	for (int i = 0; i<nn; ++i)
 	{
@@ -169,6 +167,7 @@ bool FEMeshPartition::Init()
 void FEMeshPartition::ForEachMaterialPoint(std::function<void(FEMaterialPoint& mp)> f)
 {
 	int NE = Elements();
+#pragma omp parallel for shared(f)
 	for (int i = 0; i < NE; ++i)
 	{
 		FEElement& el = ElementRef(i);
@@ -181,5 +180,9 @@ void FEMeshPartition::ForEachMaterialPoint(std::function<void(FEMaterialPoint& m
 void FEMeshPartition::ForEachElement(std::function<void(FEElement& el)> f)
 {
 	int NE = Elements();
-	for (int i = 0; i < NE; ++i) f(ElementRef(i));
+#pragma omp parallel for shared(f)
+	for (int i = 0; i < NE; ++i)
+	{
+		f(ElementRef(i));
+	}
 }

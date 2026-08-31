@@ -28,15 +28,17 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FEException.h"
+#include "FESolver.h" // for FENodalDofInfo
 #include <stdarg.h>
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-FEException::FEException(const char* msg)
+FEException::FEException(const char* msg, int level)
 {
 	if (msg) m_what = msg;
+	m_level = level;
 }
 
 FEException::~FEException()
@@ -57,10 +59,16 @@ void FEException::what(const char* msg, ...)
 	// make the message
 	char sztxt[1024] = { 0 };
 	va_start(args, msg);
-	vsprintf(sztxt, msg, args);
+	vsnprintf(sztxt, sizeof(sztxt), msg, args);
 	va_end(args);
 
 	m_what = sztxt;
+}
+
+//-----------------------------------------------------------------------------
+int FEException::level() const
+{
+	return m_level;
 }
 
 //-----------------------------------------------------------------------------
@@ -137,8 +145,9 @@ ZeroDiagonal::ZeroDiagonal(vector<int>& l, FEM& fem)
 }
 */
 //=============================================================================
-bool NegativeJacobian::m_boutput = false;
 bool NegativeJacobian::m_bthrown = false;
+int NegativeJacobian::m_maxout = 0; // output off by default
+int NegativeJacobian::m_count = 0;
 
 //-----------------------------------------------------------------------------
 NegativeJacobian::NegativeJacobian(int iel, int ng, double vol, FEElement* pe)
@@ -154,7 +163,9 @@ NegativeJacobian::NegativeJacobian(int iel, int ng, double vol, FEElement* pe)
 //-----------------------------------------------------------------------------
 bool NegativeJacobian::DoOutput()
 {
-	return m_boutput;
+	m_count++; // we do this here because this function is called from critical sections.
+	bool b = (m_maxout < 0) || (m_count <= m_maxout);
+	return b;
 }
 
 //-----------------------------------------------------------------------------
@@ -168,3 +179,39 @@ bool NegativeJacobian::IsThrown()
 {
 	return m_bthrown;
 }
+
+int NegativeJacobian::Count()
+{
+	return m_count;
+}
+
+void NegativeJacobian::ResetCount()
+{
+	m_count = 0;
+}
+
+//-----------------------------------------------------------------------------
+NANInResidualDetected::NANInResidualDetected(const FENodalDofInfo& ndi)
+{
+	what("NAN detected in residual vector at index %d.\nNode id = %d, dof = %d ('%s')", ndi.m_eq, ndi.m_node, ndi.m_dof, ndi.szdof);
+}
+
+//-----------------------------------------------------------------------------
+NANInSolutionDetected::NANInSolutionDetected(const FENodalDofInfo& ndi)
+{
+	what("NAN detected in solution vector at index %d.\nNode id = %d, dof = %d ('%s')", ndi.m_eq, ndi.m_node, ndi.m_dof, ndi.szdof);
+}
+
+
+//-----------------------------------------------------------------------------
+FEMultiScaleException::FEMultiScaleException(int eid, int gpt)
+{
+	what("The RVE problem has failed at element %d, gauss point %d.\nAborting macro run.", eid, gpt + 1);
+}
+
+//-----------------------------------------------------------------------------
+ConcentrationChangeDetected::ConcentrationChangeDetected(const FENodalDofInfo& ndi)
+{
+    what("Sudden concentration change detected.\n");
+}
+

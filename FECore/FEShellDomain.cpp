@@ -31,6 +31,10 @@ SOFTWARE.*/
 #include "FEMesh.h"
 #include "FEMaterial.h"
 
+BEGIN_FECORE_CLASS(FEShellDomain, FEDomain)
+	ADD_PROPERTY(m_matAxis, "mat_axis", FEProperty::Optional);
+END_FECORE_CLASS();
+
 //-----------------------------------------------------------------------------
 //! constructor
 FEShellDomain::FEShellDomain(FEModel* fem) : FEDomain(FE_DOMAIN_SHELL, fem)
@@ -58,12 +62,14 @@ void FEShellDomain::Reset()
 }
 
 //-----------------------------------------------------------------------------
-void FEShellDomain::InitShells()
+bool FEShellDomain::InitShells()
 {
 	ForEachShellElement([](FEShellElement& el) {
 		int n = el.Nodes();
 		for (int j = 0; j<n; ++j) el.m_ht[j] = el.m_h0[j];
 	});
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -74,7 +80,7 @@ void FEShellDomain::GetCurrentNodalCoordinates(const FEShellElement& el, vec3d* 
     if (!back)
         for (int i = 0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).m_rt;
     else
-        for (int i = 0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).m_st();
+        for (int i = 0; i<neln; ++i) rt[i] = m_pMesh->Node(el.m_node[i]).st();
 }
 
 //-----------------------------------------------------------------------------
@@ -91,7 +97,7 @@ void FEShellDomain::GetCurrentNodalCoordinates(const FEShellElement& el, vec3d* 
     else {
         for (int i = 0; i<neln; ++i) {
             FENode& nd = m_pMesh->Node(el.m_node[i]);
-            rt[i] = nd.m_st()*alpha + nd.m_sp()*(1 - alpha);
+            rt[i] = nd.st()*alpha + nd.sp()*(1 - alpha);
         }
     }
 }
@@ -104,7 +110,7 @@ void FEShellDomain::GetReferenceNodalCoordinates(const FEShellElement& el, vec3d
     if (!back)
         for (int i = 0; i<neln; ++i) r0[i] = m_pMesh->Node(el.m_node[i]).m_r0;
     else
-        for (int i = 0; i<neln; ++i) r0[i] = m_pMesh->Node(el.m_node[i]).m_s0();
+        for (int i = 0; i<neln; ++i) r0[i] = m_pMesh->Node(el.m_node[i]).s0();
 }
 
 //-----------------------------------------------------------------------------
@@ -115,7 +121,7 @@ void FEShellDomain::GetPreviousNodalCoordinates(const FEShellElement& el, vec3d*
     if (!back)
         for (int i = 0; i<neln; ++i) rp[i] = m_pMesh->Node(el.m_node[i]).m_rp;
     else
-        for (int i = 0; i<neln; ++i) rp[i] = m_pMesh->Node(el.m_node[i]).m_sp();
+        for (int i = 0; i<neln; ++i) rp[i] = m_pMesh->Node(el.m_node[i]).sp();
 }
 
 //-----------------------------------------------------------------------------
@@ -201,9 +207,9 @@ double FEShellDomainOld::Volume(FEShellElement& se)
 //-----------------------------------------------------------------------------
 //! Calculate all shell normals (i.e. the shell directors).
 //! And find shell nodes
-void FEShellDomainOld::InitShells()
+bool FEShellDomainOld::InitShells()
 {
-	FEShellDomain::InitShells();
+	if (!FEShellDomain::InitShells()) return false;
 
 	FEMesh& mesh = *GetMesh();
 	for (int i = 0; i<Elements(); ++i)
@@ -217,12 +223,19 @@ void FEShellDomainOld::InitShells()
 			el.m_D0[j] = d0 * el.m_h0[j];
 		}
 	}
+
+	return true;
 }
 
 //=================================================================================================
 
+BEGIN_FECORE_CLASS(FEShellDomainNew, FEShellDomain)
+	ADD_PARAMETER(m_h0, "shell_thickness");
+END_FECORE_CLASS();
+
 FEShellDomainNew::FEShellDomainNew(FEModel* fem) : FEShellDomain(fem)
 {
+	m_h0 = 0.0;
 }
 
 //-----------------------------------------------------------------------------
@@ -240,6 +253,20 @@ bool FEShellDomainNew::Create(int nelems, FE_Element_Spec espec)
 		for (int i = 0; i<nelems; ++i) m_Elem[i].SetType(espec.etype);
 
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+void FEShellDomainNew::AssignDefaultShellThickness()
+{
+	double h0 = DefaultShellThickness();
+	if (h0 <= 0.0) return;
+
+	for (int j = 0; j < Elements(); ++j)
+	{
+		FEShellElement& el = Element(j);
+		int ne = el.Nodes();
+		for (int n = 0; n < ne; ++n) el.m_ht[n] = el.m_h0[n] = h0;
+	}
 }
 
 //-----------------------------------------------------------------------------

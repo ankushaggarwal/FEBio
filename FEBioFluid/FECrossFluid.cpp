@@ -32,10 +32,10 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FECrossFluid, FEViscousFluid)
-	ADD_PARAMETER(m_mu0, FE_RANGE_GREATER_OR_EQUAL(0.0), "mu0");
-	ADD_PARAMETER(m_mui, FE_RANGE_GREATER_OR_EQUAL(0.0), "mui");
-	ADD_PARAMETER(m_lam, FE_RANGE_GREATER_OR_EQUAL(0.0), "lambda");
-	ADD_PARAMETER(m_m  , FE_RANGE_GREATER_OR_EQUAL(2.0), "m");
+	ADD_PARAMETER(m_mu0, FE_RANGE_GREATER_OR_EQUAL(0.0), "mu0")->setUnits("P.t")->setLongName("zero shear rate viscosity");
+	ADD_PARAMETER(m_mui, FE_RANGE_GREATER_OR_EQUAL(0.0), "mui")->setUnits("P.t")->setLongName("infinite shear rate viscosity");
+	ADD_PARAMETER(m_lam, FE_RANGE_GREATER_OR_EQUAL(0.0), "lambda")->setUnits(UNIT_TIME)->setLongName("relaxation time");
+	ADD_PARAMETER(m_m  , FE_RANGE_GREATER_OR_EQUAL(2.0), "m")->setLongName("power");
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -94,6 +94,21 @@ double FECrossFluid::ShearViscosity(FEMaterialPoint& pt)
     double lamg = m_lam*gdot;
     double mu = m_mui + (m_mu0 - m_mui)/(1+pow(lamg, m_m));
     return mu;
+}
+
+//! derivative of shear viscosity w.r.t. strain rate
+double FECrossFluid::Tangent_ShearViscosity_StrainRate(FEMaterialPoint& mp)
+{
+	FEFluidMaterialPoint& vt = *mp.ExtractData<FEFluidMaterialPoint>();
+	mat3ds D = vt.RateOfDeformation();
+	double gdot = sqrt(2 * (D.sqr()).tr());
+	double lamg = m_lam * gdot;
+
+	double dmu = -2 * (m_mu0 - m_mui) * m_m * pow(m_lam, m_m) * pow(gdot, m_m - 2) / pow(1 + pow(lamg, m_m), 2);
+
+	double dmu_dgdot = 0.5 * gdot * dmu;
+
+   return dmu_dgdot;
 }
 
 //-----------------------------------------------------------------------------

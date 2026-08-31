@@ -32,6 +32,7 @@ SOFTWARE.*/
 #include "FEException.h"
 #include "FESolidElementShape.h"
 #include "FESurfaceElementShape.h"
+using namespace std;
 
 #ifndef SQR
 #define SQR(x) ((x)*(x))
@@ -637,23 +638,33 @@ FEPenta15G21::FEPenta15G21() : FEPenta15_(NINT, FE_PENTA15G21)
 
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(NELN, NINT);
+    for (int i=0; i<NINT; ++i)
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n);
+    
+    m_Hi.resize(NELN, NELN);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEPenta15G21::project_to_nodes(double* ai, double* ao) const
 {
+    double v[NELN];
+    for (int n=0; n<NELN; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
     for (int j=0; j<NELN; ++j)
     {
         ao[j] = 0;
         for (int k=0; k<NELN; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -1727,6 +1738,63 @@ void FEQuad4G4::project_to_nodes(double* ai, double* ao) const
 }
 
 //=============================================================================
+//                          F E Q U A D G 16
+//=============================================================================
+
+FEQuad4G16::FEQuad4G16() : FEQuad4_(NINT, FE_QUAD4G16)
+{
+	const double a = 0.339981;
+	const double b = 0.861136;
+
+	const double wa = 0.652145;
+	const double wb = 0.347855;
+
+	gr[ 0] = -b; gs[ 0] = -b; gw[ 0] = wb * wb;
+	gr[ 1] = -a; gs[ 1] = -b; gw[ 1] = wa * wb;
+	gr[ 2] =  a; gs[ 2] = -b; gw[ 2] = wa * wb;
+	gr[ 3] =  b; gs[ 3] = -b; gw[ 3] = wb * wb;
+
+	gr[ 4] = -b; gs[ 4] = -a; gw[ 4] = wa * wb;
+	gr[ 5] = -a; gs[ 5] = -a; gw[ 5] = wa * wa;
+	gr[ 6] =  a; gs[ 6] = -a; gw[ 6] = wa * wa;
+	gr[ 7] =  b; gs[ 7] = -a; gw[ 7] = wa * wb;
+
+	gr[ 8] = -b; gs[ 8] =  a; gw[ 8] = wa * wb;
+	gr[ 9] = -a; gs[ 9] =  a; gw[ 9] = wa * wa;
+	gr[10] =  a; gs[10] =  a; gw[10] = wa * wa;
+	gr[11] =  b; gs[11] =  a; gw[11] = wa * wb;
+
+	gr[12] = -b; gs[12] =  b; gw[12] = wb * wb;
+	gr[13] = -a; gs[13] =  b; gw[13] = wa * wb;
+	gr[14] =  a; gs[14] =  b; gw[14] = wa * wb;
+	gr[15] =  b; gs[15] =  b; gw[15] = wb * wb;
+
+	init();
+	// we need Ai to project integration point data to the nodes
+	matrix A(NELN, NELN);
+	m_Ai.resize(NELN, NELN);
+	A = m_H.transpose() * m_H;
+	m_Ai = A.inverse();
+}
+
+//-----------------------------------------------------------------------------
+void FEQuad4G16::project_to_nodes(double* ai, double* ao) const
+{
+	vector<double> b(NELN);
+	for (int i = 0; i < NELN; ++i)
+	{
+		b[i] = 0;
+		for (int j = 0; j < NINT; ++j) b[i] += m_H[j][i] * ai[j];
+	}
+
+	for (int i = 0; i < NELN; ++i)
+	{
+		ao[i] = 0;
+		for (int j = 0; j < NELN; ++j) ao[i] += m_Ai[i][j] * b[j];
+	}
+}
+
+//=============================================================================
 //                          F E Q U A D N I
 //=============================================================================
 
@@ -2624,6 +2692,8 @@ void FEQuad9NI::project_to_nodes(double* ai, double* ao) const
 
 FEShellElementTraits::FEShellElementTraits(int ni, int ne, FE_Element_Shape es, FE_Element_Type et) : FEElementTraits(ni, ne, FE_ELEM_SHELL, es, et)
 {
+	m_nvln = ne;
+
 	gr.resize(ni);
 	gs.resize(ni);
 	gt.resize(ni);
@@ -2664,6 +2734,20 @@ void FEShellElementTraits::init()
     }
 }
 
+//! project mat3ds integration point data to nodes
+void FEShellElementTraits::project_to_nodes(mat3ds* si, mat3ds* so) const
+{
+	double ai[FEElement::MAX_INTPOINTS];
+	double ao[FEElement::MAX_NODES];
+	for (int i = 0; i < 3; ++i) {
+		for (int j = i; j < 3; ++j) {
+			for (int n = 0; n < m_nint; ++n) ai[n] = si[n](i, j);
+			project_to_nodes(ai, ao);
+			for (int n = 0; n < m_nvln; ++n) so[n](i, j) = ao[n];
+		}
+	}
+}
+
 //=============================================================================
 //                                F E S H E L L Q U A D 4
 //=============================================================================
@@ -2693,6 +2777,33 @@ void FEShellQuad4_::shape_deriv(double* Hr, double* Hs, double r, double s)
 }
 
 //*****************************************************************************
+//                          S H E L L Q U A D 4 G 4
+//*****************************************************************************
+
+FEShellQuad4G4::FEShellQuad4G4() : FEShellQuad4_(NINT, FE_SHELL_QUAD4G4)
+{
+	const double a = 1.0 / sqrt(3.0);
+	gr[0] = -a; gs[0] = -a; gw[0] = 1;
+	gr[1] =  a; gs[1] = -a; gw[1] = 1;
+	gr[2] =  a; gs[2] =  a; gw[2] = 1;
+	gr[3] = -a; gs[3] =  a; gw[3] = 1;
+	init(); 
+	m_Hi = m_H.inverse();
+}
+
+void FEShellQuad4G4::project_to_nodes(double* ai, double* ao) const
+{
+	int ni = NINT;
+	int ne = NELN;
+	assert(ni == ne);
+	for (int i = 0; i < ne; ++i)
+	{
+		ao[i] = 0;
+		for (int j = 0; j < ni; ++j) ao[i] += m_Hi[i][j] * ai[j];
+	}
+}
+
+//*****************************************************************************
 //                          S H E L L Q U A D 4 G 8
 //*****************************************************************************
 
@@ -2700,6 +2811,7 @@ int FEShellQuad4G8::ni[NELN] = { 4, 5, 6, 7 };
 
 FEShellQuad4G8::FEShellQuad4G8() : FEShellQuad4_(NINT, FE_SHELL_QUAD4G8)
 {
+    m_nvln = 8;
     const double a = 1.0 / sqrt(3.0);
     const double w = 1.0;
     
@@ -2714,11 +2826,17 @@ FEShellQuad4G8::FEShellQuad4G8() : FEShellQuad4_(NINT, FE_SHELL_QUAD4G8)
     gr[ 7] = -a; gs[ 7] =  a; gt[ 7] =  a; gw[ 7] = w;
     
     init();
-    
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
     m_Hi = m_Hi.inverse();
 }
 
@@ -2726,12 +2844,19 @@ FEShellQuad4G8::FEShellQuad4G8() : FEShellQuad4_(NINT, FE_SHELL_QUAD4G8)
 //! project to nodes
 void FEShellQuad4G8::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+    std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -2744,6 +2869,7 @@ int FEShellQuad4G12::ni[NELN] = { 8, 9, 10, 11 };
 
 FEShellQuad4G12::FEShellQuad4G12() : FEShellQuad4_(NINT, FE_SHELL_QUAD4G12)
 {
+    m_nvln = 8;
     const double a = 1.0 / sqrt(3.0);
     const double b = sqrt(3.0/5.0);
     const double w = 5.0 / 9.0;
@@ -2765,23 +2891,36 @@ FEShellQuad4G12::FEShellQuad4G12() : FEShellQuad4_(NINT, FE_SHELL_QUAD4G12)
     
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellQuad4G12::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -2812,6 +2951,33 @@ void FEShellTri3_::shape_deriv(double* Hr, double* Hs, double r, double s)
 }
 
 //*****************************************************************************
+//                          F E S H E L L T R I G 3 
+//*****************************************************************************
+
+//-----------------------------------------------------------------------------
+FEShellTri3G3::FEShellTri3G3() : FEShellTri3_(NINT, FE_SHELL_TRI3G3)
+{
+	const double a = 1.0 / 6.0;
+	const double b = 2.0 / 3.0;
+	gr[0] = a; gs[0] = a; gw[0] = a;
+	gr[1] = b; gs[1] = a; gw[1] = a;
+	gr[2] = a; gs[2] = b; gw[2] = a;
+	init();
+	m_Hi = m_H.inverse();
+}
+
+//-----------------------------------------------------------------------------
+void FEShellTri3G3::project_to_nodes(double* ai, double* ao) const
+{
+	assert(NINT == NELN);
+	for (int i = 0; i < NELN; ++i)
+	{
+		ao[i] = 0;
+		for (int j = 0; j < NINT; ++j) ao[i] += m_Hi[i][j] * ai[j];
+	}
+}
+
+//*****************************************************************************
 //                          S H E L L T R I 3 G 6
 //*****************************************************************************
 
@@ -2819,6 +2985,7 @@ int FEShellTri3G6::ni[NELN] = { 3, 4, 5 };
 
 FEShellTri3G6::FEShellTri3G6() : FEShellTri3_(NINT, FE_SHELL_TRI3G6)
 {
+    m_nvln = 6;
     //gauss intergration points
     const double a = 1.0/6.0;
     const double b = 2.0/3.0;
@@ -2833,23 +3000,36 @@ FEShellTri3G6::FEShellTri3G6() : FEShellTri3_(NINT, FE_SHELL_TRI3G6)
 
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellTri3G6::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -2862,6 +3042,7 @@ int FEShellTri3G9::ni[NELN] = { 6, 7, 8 };
 
 FEShellTri3G9::FEShellTri3G9() : FEShellTri3_(NINT, FE_SHELL_TRI3G9)
 {
+    m_nvln = 6;
     const double a = 1.0 / 6.0;
     const double b = 2.0 / 3.0;
     const double w1 = 5.0 / 9.0;
@@ -2881,23 +3062,36 @@ FEShellTri3G9::FEShellTri3G9() : FEShellTri3_(NINT, FE_SHELL_TRI3G9)
     
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellTri3G9::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -2953,6 +3147,8 @@ int FEShellQuad8G18::ni[NELN] = { 9, 10, 11, 12, 14, 15, 16, 17 };
 
 FEShellQuad8G18::FEShellQuad8G18() : FEShellQuad8_(NINT, FE_SHELL_QUAD8G18)
 {
+    m_nvln = 16;
+
     // integration point coordinates
     const double a = 0.774596669241483;
     const double c = 0.577350269189626;
@@ -2979,23 +3175,36 @@ FEShellQuad8G18::FEShellQuad8G18() : FEShellQuad8_(NINT, FE_SHELL_QUAD8G18)
     
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellQuad8G18::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -3008,6 +3217,8 @@ int FEShellQuad8G27::ni[NELN] = { 18, 19, 20, 21, 23, 24, 25, 26 };
 
 FEShellQuad8G27::FEShellQuad8G27() : FEShellQuad8_(NINT, FE_SHELL_QUAD8G27)
 {
+    m_nvln = 16;
+
     // integration point coordinates
     const double a = 0.774596669241483;
     const double w1 = 5.0 / 9.0;
@@ -3042,23 +3253,36 @@ FEShellQuad8G27::FEShellQuad8G27() : FEShellQuad8_(NINT, FE_SHELL_QUAD8G27)
     
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellQuad8G27::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -3109,6 +3333,8 @@ int FEShellTri6G14::ni[NELN] = { 8, 9, 10, 11, 12, 13 };
 
 FEShellTri6G14::FEShellTri6G14() : FEShellTri6_(NINT, FE_SHELL_TRI6G14)
 {
+    m_nvln = 12;
+
     const double a = 0.774596669241483;
     const double c = 0.577350269189626;
     const double w = 1.0/2.0;
@@ -3131,23 +3357,36 @@ FEShellTri6G14::FEShellTri6G14() : FEShellTri6_(NINT, FE_SHELL_TRI6G14)
     
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellTri6G14::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -3160,6 +3399,8 @@ int FEShellTri6G21::ni[NELN] = { 15, 16, 17, 18, 19, 20 };
 
 FEShellTri6G21::FEShellTri6G21() : FEShellTri6_(NINT, FE_SHELL_TRI6G21)
 {
+    m_nvln = 12;
+
     const double a = 0.774596669241483;
     const double w = 1.0/2.0;
     const double w1 = 5.0 / 9.0;
@@ -3191,23 +3432,36 @@ FEShellTri6G21::FEShellTri6G21() : FEShellTri6_(NINT, FE_SHELL_TRI6G21)
     
     init();
     
-	m_Hi.resize(NELN, NELN);
-    for (int i=0; i<NELN; ++i)
+    m_MT.resize(m_nvln, NINT);
+    for (int i=0; i<NINT; ++i) {
         for (int n=0; n<NELN; ++n)
-			m_Hi(i,n) = m_H(ni[i],n);
-	m_Hi = m_Hi.inverse();
+            m_MT(n,i) = m_H(i,n)*(1-gt[i])/2;
+        for (int n=NELN; n<m_nvln; ++n)
+            m_MT(n,i) = m_H(i,n-NELN)*(1+gt[i])/2;
+    }
+    
+    m_Hi.resize(m_nvln, m_nvln);
+    m_Hi = m_MT*m_MT.transpose();
+    m_Hi = m_Hi.inverse();
 }
 
 //-----------------------------------------------------------------------------
 //! project to nodes
 void FEShellTri6G21::project_to_nodes(double* ai, double* ao) const
 {
-    for (int j=0; j<NELN; ++j)
+	std::vector<double> v(m_nvln);
+    for (int n=0; n<m_nvln; ++n) {
+        v[n] = 0;
+        for (int i=0; i<NINT; ++i) {
+            v[n] += m_MT(n,i)*ai[i];
+        }
+    }
+    for (int j=0; j<m_nvln; ++j)
     {
         ao[j] = 0;
-        for (int k=0; k<NELN; ++k)
+        for (int k=0; k<m_nvln; ++k)
         {
-            ao[j] += m_Hi[j][k]*ai[ni[k]];
+            ao[j] += m_Hi[j][k]*v[k];
         }
     }
 }
@@ -3216,9 +3470,36 @@ void FEShellTri6G21::project_to_nodes(double* ai, double* ao) const
 //                          F E T R U S S E L E M E N T
 //=============================================================================
 
+FETrussElementTraits::FETrussElementTraits() : FEElementTraits(NINT, NELN, FE_ELEM_TRUSS, ET_TRUSS2, FE_TRUSS) 
+{ 
+	gr.resize(NINT, 0);
+	gw.resize(NINT, 0);
+
+	init(); 
+}
+
 void FETrussElementTraits::init()
 {
+	const double a = 1.0 / sqrt(3.0);
+	gr[0] = -a; gr[1] =  a;
+	gw[0] = gw[1] = 1;
+	assert(m_nint > 0);
+	assert(m_neln > 0);
 
+	// evaluate shape functions
+	const int NE = FEElement::MAX_NODES;
+	double N[NE];
+	for (int n = 0; n < m_nint; ++n)
+	{
+		shape(N, gr[n]);
+		for (int i = 0; i < m_neln; ++i) m_H[n][i] = N[i];
+	}
+}
+
+void FETrussElementTraits::shape(double* H, double r)
+{
+	H[0] = 0.5 * (1.0 - r);
+	H[1] = 0.5 * (1.0 + r);
 }
 
 //=============================================================================
@@ -3792,4 +4073,180 @@ void FELine2G1::project_to_nodes(double* ai, double* ao) const
 {
 	ao[0] = ai[0];
 	ao[1] = ai[0];
+}
+
+//=============================================================================
+//                          FELine2NI 
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+FELine2NI::FELine2NI() : FELine2_(NINT, FE_LINE2NI)
+{
+	gr[0] = -1; gr[1] = 1;
+	gw[0] = gw[1] = 1.0;
+	init();
+}
+
+//-----------------------------------------------------------------------------
+void FELine2NI::project_to_nodes(double* ai, double* ao) const
+{
+	ao[0] = ai[0];
+	ao[1] = ai[1];
+}
+
+//=============================================================================
+//
+//                  B E A M    E L E M E N T S
+//
+//=============================================================================
+
+FEBeamElementTraits::FEBeamElementTraits(int ni, int ne, FE_Element_Shape es, FE_Element_Type et) : FEElementTraits(ni, ne, FE_ELEM_EDGE, es, et)
+{
+	gr.resize(ni);
+	gw.resize(ni);
+	Gr.resize(ni, ne);
+	Grr.resize(ni, ne);
+}
+
+//-----------------------------------------------------------------------------
+void FEBeamElementTraits::init()
+{
+	assert(m_nint > 0);
+	assert(m_neln > 0);
+
+	// evaluate shape functions
+	const int NE = FEElement::MAX_NODES;
+	double N[NE];
+	for (int n = 0; n < m_nint; ++n)
+	{
+		shape(N, gr[n]);
+		for (int i = 0; i < m_neln; ++i) m_H[n][i] = N[i];
+	}
+
+	// evaluate shape function derivatives
+	double Nr[NE];
+	for (int n = 0; n < m_nint; ++n)
+	{
+		shape_deriv(Nr, gr[n]);
+		for (int i = 0; i < m_neln; ++i)
+		{
+			Gr[n][i] = Nr[i];
+		}
+	}
+}
+
+//=============================================================================
+//                         FEBeam2_
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+void FEBeam2_::shape(double* H, double r)
+{
+	H[0] = 0.5 * (1.0 - r);
+	H[1] = 0.5 * (1.0 + r);
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam2_::shape_deriv(double* Hr, double r)
+{
+	Hr[0] = -0.5;
+	Hr[1] = 0.5;
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam2_::shape_deriv2(double* Hrr, double r)
+{
+	Hrr[0] = 0;
+	Hrr[1] = 0;
+}
+
+//=============================================================================
+//                          FEBeam2G1 
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+FEBeam2G1::FEBeam2G1() : FEBeam2_(NINT, FE_BEAM2G1)
+{
+	gr[0] = 0.0; gw[0] = 2.0;
+	init();
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam2G1::project_to_nodes(double* ai, double* ao) const
+{
+	ao[0] = ai[0];
+	ao[1] = ai[0];
+}
+
+//=============================================================================
+//                          FEBeam2G2 
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+FEBeam2G2::FEBeam2G2() : FEBeam2_(NINT, FE_BEAM2G2)
+{
+	const double a = 1.0 / sqrt(3.0);
+	gr[0] = -a; gw[0] = 1.0;
+	gr[1] =  a; gw[1] = 1.0;
+	init();
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam2G2::project_to_nodes(double* ai, double* ao) const
+{
+	// TODO: implement better!
+	ao[0] = ai[0];
+	ao[1] = ai[1];
+}
+
+
+//=============================================================================
+//                         FEBeam3_
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+void FEBeam3_::shape(double* H, double r)
+{
+	H[0] = 0.5 * r * (r - 1.0);
+	H[1] = 0.5 * r * (r + 1.0);
+	H[2] = 1.0 - r*r;
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam3_::shape_deriv(double* Hr, double r)
+{
+	Hr[0] = 0.5 * (2.0*r - 1.0);
+	Hr[1] = 0.5 * (2.0*r + 1.0);
+	Hr[2] = -2.0*r;
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam3_::shape_deriv2(double* Hrr, double r)
+{
+	Hrr[0] =  1.0;
+	Hrr[1] =  1.0;
+	Hrr[2] = -2.0;
+}
+
+//=============================================================================
+//                          FEBeam3G2 
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+FEBeam3G2::FEBeam3G2() : FEBeam3_(NINT, FE_BEAM3G2)
+{
+	const double a = 1.0/sqrt(3.0);
+	gr[0] = -a; gw[0] = 1.0;
+	gr[1] =  a; gw[1] = 1.0;
+	init();
+}
+
+//-----------------------------------------------------------------------------
+void FEBeam3G2::project_to_nodes(double* ai, double* ao) const
+{
+	// TODO: implement this better
+	assert(false);
+	ao[0] = ai[0];
+	ao[1] = ai[1];
+	ao[2] = 0.5*(ai[0] + ai[1]);
 }

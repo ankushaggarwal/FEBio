@@ -28,12 +28,13 @@ SOFTWARE.*/
 
 #pragma once
 #include "FEElasticFiberMaterial.h"
+#include "FEFiberMaterial.h"
 
 //-----------------------------------------------------------------------------
 //! Material class for single fiber, tension only
 //! Power law - linear
 
-class FEFiberPowLinear : public FEElasticFiberMaterial
+class FEFiberPowLinear : public FEFiberMaterial
 {
 public:
     FEFiberPowLinear(FEModel* pfem);
@@ -55,11 +56,19 @@ public:
     FEParamDouble   m_lam0;     // stretch ratio at end of toe region
     FEParamDouble   m_beta;     // power law exponent in toe region
 	double	m_epsf;
+	bool	m_tension_only;
+};
+
+class FEElasticFiberPowLinear : public FEElasticFiberMaterial_T<FEFiberPowLinear>
+{
+public:
+	FEElasticFiberPowLinear(FEModel* fem) : FEElasticFiberMaterial_T<FEFiberPowLinear>(fem) {}
+	DECLARE_FECORE_CLASS();
 };
 
 //-----------------------------------------------------------------------------
 //! Exponential-Power law toe region - linear
-class FEFiberExpPowLinear : public FEElasticFiberMaterial
+class FEFiberExpPowLinear : public FEFiberMaterial
 {
 public:
 	FEFiberExpPowLinear(FEModel* pfem);
@@ -84,5 +93,12 @@ public:
 	double	m_epsf;
 
 	// declare the parameter list
+	DECLARE_FECORE_CLASS();
+};
+
+class FEElasticFiberExpPowLinear : public FEElasticFiberMaterial_T<FEFiberExpPowLinear>
+{
+public:
+	FEElasticFiberExpPowLinear(FEModel* fem) : FEElasticFiberMaterial_T<FEFiberExpPowLinear>(fem) {}
 	DECLARE_FECORE_CLASS();
 };

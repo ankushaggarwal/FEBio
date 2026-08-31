@@ -46,6 +46,9 @@ public:
     bool InitEquations() override;
 	bool InitEquations2() override;
 
+	//! preferred matrix type should be unsymmetric.
+	Matrix_Type PreferredMatrixType() const override { return REAL_UNSYMMETRIC; };
+
 public:
     //{ --- evaluation and update ---
     //! Perform an update
@@ -94,7 +97,6 @@ public:
 	int			m_nCeq;		//!< total number of concentration dofs
 
 public:
-    vector<double> m_Fn;    //!< concentrated nodal force vector
     vector<double> m_Fr;    //!< nodal reaction forces
     
     // solute data

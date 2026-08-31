@@ -27,7 +27,7 @@ SOFTWARE.*/
 #include "Quadric.h"
 #include "matrix.h"
 #include <math.h>
-
+using namespace std;
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643
 #endif
@@ -207,11 +207,11 @@ void Quadric::SurfaceCurvature(const vec3d p, const vec3d pn, vec2d& kappa, vec3
     
     // check quadric normal versus face normal
     if (xn*pn >= 0) {
-        kappa.x() = kmax; kappa.y() = kmin;
+        kappa.x = kmax; kappa.y = kmin;
         v[0] = xmax; v[1] = xmin;
     }
     else {
-        kappa.x() = kmin; kappa.y() = kmax;
+        kappa.x = kmin; kappa.y = kmax;
         v[0] = xmin; v[1] = xmax;
     }
     // fix handedness if neeeded

@@ -28,13 +28,11 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "FEIdealGasIsothermal.h"
-#include "FECore/FEModel.h"
-#include "FECore/FECoreKernel.h"
 #include <FECore/log.h>
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEIdealGasIsothermal, FEFluid)
-	ADD_PARAMETER(m_M    , FE_RANGE_GREATER(0.0), "M"    );
+	ADD_PARAMETER(m_M    , FE_RANGE_GREATER(0.0), "M"    )->setUnits(UNIT_MOLAR_MASS)->setLongName("molar mass");
 END_FECORE_CLASS();
 
 //============================================================================
@@ -55,9 +53,9 @@ FEIdealGasIsothermal::FEIdealGasIsothermal(FEModel* pfem) : FEFluid(pfem)
 //! initialization
 bool FEIdealGasIsothermal::Init()
 {
-    m_R  = GetFEModel()->GetGlobalConstant("R");
-    m_Tr = GetFEModel()->GetGlobalConstant("T");
-    m_Pr = GetFEModel()->GetGlobalConstant("P");
+    m_R  = GetGlobalConstant("R");
+    m_Tr = GetGlobalConstant("T");
+    m_Pr = GetGlobalConstant("P");
     
     if (m_R  <= 0) { feLogError("A positive universal gas constant R must be defined in Globals section");    return false; }
     if (m_Pr <= 0) { feLogError("A positive ambient absolute pressure P must be defined in Globals section"); return false; }
@@ -65,6 +63,15 @@ bool FEIdealGasIsothermal::Init()
     m_rhor = m_M*m_Pr/(m_R*m_Tr);
     
     return true;
+}
+
+//-----------------------------------------------------------------------------
+void FEIdealGasIsothermal::Serialize(DumpStream& ar)
+{
+    FEFluid::Serialize(ar);
+    if (ar.IsShallow()) return;
+    
+    ar & m_R & m_Pr & m_Tr & m_rhor;
 }
 
 //-----------------------------------------------------------------------------
@@ -121,8 +128,8 @@ double FEIdealGasIsothermal::StrainEnergyDensity(FEMaterialPoint& mp)
 }
 
 //-----------------------------------------------------------------------------
-//! invert pressure-dilatation relation
-bool FEIdealGasIsothermal::Dilatation(const double T, const double p, const double c, double& e)
+//! invert effective pressure-dilatation relation
+bool FEIdealGasIsothermal::Dilatation(const double T, const double p, double& e)
 {
     double J = m_Pr/(p+m_Pr);
     e = J - 1;

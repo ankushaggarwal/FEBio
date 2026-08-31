@@ -28,6 +28,7 @@ SOFTWARE.*/
 
 #pragma once
 #include "FEMeshPartition.h"
+#include "FEMat3dValuator.h"
 
 // forward declaration of material class
 class FEMaterial;
@@ -77,10 +78,18 @@ public:
 	//! Activate the domain
 	virtual void Activate();
 
+	//! Gives domains a chance to update any data that depends on the displacement increments.
+	//! This function is called during the line search as well. The finalFlag
+	//! indicates whether it is safe to commit the updates.
+	virtual void IncrementalUpdate(std::vector<double>& ui, bool finalFlag);
+
 protected:
 	// helper function for activating dof lists
 	void Activate(const FEDofList& dof);
 
 	// helper function for unpacking element dofs
 	void UnpackLM(FEElement& el, const FEDofList& dof, vector<int>& lm);
+
+protected:
+	FEMat3dValuator* m_matAxis; // initial material axis
 };

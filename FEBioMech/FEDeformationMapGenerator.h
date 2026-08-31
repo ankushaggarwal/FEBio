@@ -26,7 +26,9 @@ SOFTWARE.*/
 #pragma once
 #include <FECore/FEDataGenerator.h>
 
-class FEDeformationMapGenerator : public FEDataGenerator
+class FENodeDataMap;
+
+class FEDeformationMapGenerator : public FEElemDataGenerator
 {
 public:
 	FEDeformationMapGenerator(FEModel* fem);
@@ -35,7 +37,7 @@ public:
 	bool Init() override;
 
 	// generate the data array for the given element set
-	bool Generate(FEDomainMap& data) override;
+	FEDataMap* Generate() override;
 
 private:
 	std::string		m_nodeDisplacementMap;

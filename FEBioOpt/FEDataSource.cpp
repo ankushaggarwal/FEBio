@@ -80,7 +80,7 @@ void FEDataParameter::update()
 	m_rf.Add(x, y);
 }
 
-FEDataParameter::FEDataParameter(FEModel* fem) : FEDataSource(fem), m_rf(fem)
+FEDataParameter::FEDataParameter(FEModel* fem) : FEDataSource(fem)
 {
 	m_ord = "fem.time";
 }
@@ -119,14 +119,14 @@ bool FEDataParameter::Init()
 			if (sz[0] == '\'') sz++;
 			*c1 = 0;
 
-			FENodeLogData* pd = fecore_new<FENodeLogData>(sz, fem);
+			FELogNodeData* pd = fecore_new<FELogNodeData>(sz, fem);
 			if (pd == nullptr) { feLogErrorEx(fem, "Invalid parameter name %s", m_param.c_str()); return false; }
 
 			FEMesh& mesh = fem->GetMesh();
 			FENode* pn = mesh.FindNodeFromID(nid);
 			if (pn == nullptr) { feLogErrorEx(fem, "Invalid node id"); return false; }
 
-			m_fy = [=]() { return pd->value(nid - 1); };
+			m_fy = [=]() { return pd->value(*pn); };
 		}
 		else if (strstr(m_param.c_str(), "fem.element_data"))
 		{
@@ -297,14 +297,14 @@ bool FEDataParameter::Init()
             if (sz[0] == '\'') sz++;
             *c1 = 0;
             
-            FENodeLogData* pd = fecore_new<FENodeLogData>(sz, fem);
+            FELogNodeData* pd = fecore_new<FELogNodeData>(sz, fem);
             if (pd == nullptr) { feLogErrorEx(fem, "Invalid ordinate name %s", m_ord.c_str()); return false; }
             
             FEMesh& mesh = fem->GetMesh();
             FENode* pn = mesh.FindNodeFromID(nid);
             if (pn == nullptr) { feLogErrorEx(fem, "Invalid node id"); return false; }
             
-            m_fx = [=]() { return pd->value(nid - 1); };
+            m_fx = [=]() { return pd->value(*pn); };
         }
 		else if (strstr(m_ord.c_str(), "fem.element_data"))
 		{
@@ -370,12 +370,10 @@ FEDataFilterPositive::FEDataFilterPositive(FEModel* fem) : FEDataSource(fem)
 
 FEDataFilterPositive::~FEDataFilterPositive()
 {
-	if (m_src) delete m_src;
 }
 
 void FEDataFilterPositive::SetDataSource(FEDataSource* src)
 {
-	if (m_src) delete m_src;
 	m_src = src;
 }
 
@@ -399,25 +397,24 @@ double FEDataFilterPositive::Evaluate(double t)
 
 
 //=================================================================================================
-FEDataFilterSum::FEDataFilterSum(FEModel* fem) : FEDataSource(fem), m_rf(fem)
+FENodeDataFilterSum::FENodeDataFilterSum(FEModel* fem) : FEDataSource(fem)
 {
 	m_data = nullptr;
 	m_nodeSet = nullptr;
 }
 
-FEDataFilterSum::~FEDataFilterSum()
+FENodeDataFilterSum::~FENodeDataFilterSum()
 {
-	delete m_data;
 }
 
-void FEDataFilterSum::SetData(FENodeLogData* data, FENodeSet* nodeSet)
+void FENodeDataFilterSum::SetData(FELogNodeData* data, FENodeSet* nodeSet)
 {
 	m_data = data;
 	m_nodeSet = nodeSet;
 }
 
 // Initialize data
-bool FEDataFilterSum::Init()
+bool FENodeDataFilterSum::Init()
 {
 	if (m_data == nullptr) return false;
 	if (m_nodeSet == nullptr) return false;
@@ -431,28 +428,28 @@ bool FEDataFilterSum::Init()
 }
 
 // reset data
-void FEDataFilterSum::Reset()
+void FENodeDataFilterSum::Reset()
 {
 	m_rf.Clear();
 	m_rf.Add(0, 0);
 }
 
 // evaluate data source at x
-double FEDataFilterSum::Evaluate(double x)
+double FENodeDataFilterSum::Evaluate(double x)
 {
 	return m_rf.value(x);
 }
 
-bool FEDataFilterSum::update(FEModel* pmdl, unsigned int nwhen, void* pd)
+bool FENodeDataFilterSum::update(FEModel* pmdl, unsigned int nwhen, void* pd)
 {
 	// get the optimizaton data
-	FEDataFilterSum& src = *((FEDataFilterSum*)pd);
+	FENodeDataFilterSum& src = *((FENodeDataFilterSum*)pd);
 	src.update();
 
 	return true;
 }
 
-void FEDataFilterSum::update()
+void FENodeDataFilterSum::update()
 {
 	// get the current time value
 	double time = m_fem.GetTime().currentTime;
@@ -462,7 +459,82 @@ void FEDataFilterSum::update()
 	double sum = 0.0;
 	for (int i = 0; i < m_nodeSet->Size(); ++i)
 	{
-		double vi = m_data->value(ns[i]);
+		double vi = m_data->value(*ns.Node(i));
+		sum += vi;
+	}
+
+	// evaluate the current reaction force value
+	double x = time;
+	double y = sum;
+
+	// add the data pair to the loadcurve
+	m_rf.Add(x, y);
+}
+
+FEElemDataFilterSum::FEElemDataFilterSum(FEModel* fem) : FEDataSource(fem)
+{
+	m_data = nullptr;
+	m_elemSet = nullptr;
+}
+
+FEElemDataFilterSum::~FEElemDataFilterSum()
+{
+	
+}
+
+void FEElemDataFilterSum::SetData(FELogElemSource* data, FEElementSet* elemSet)
+{
+	m_data = data;
+	m_elemSet = elemSet;
+}
+
+// Initialize data
+bool FEElemDataFilterSum::Init()
+{
+	if (m_data == nullptr) return false;
+	if (m_elemSet == nullptr) return false;
+
+	if (m_data->Init() == false) return false;
+
+	// register callback
+	m_fem.AddCallback(update, CB_MAJOR_ITERS, (void*)this);
+
+	return FEDataSource::Init();
+}
+
+// reset data
+void FEElemDataFilterSum::Reset()
+{
+	m_rf.Clear();
+	m_rf.Add(0, 0);
+}
+
+// evaluate data source at x
+double FEElemDataFilterSum::Evaluate(double x)
+{
+	return m_rf.value(x);
+}
+
+bool FEElemDataFilterSum::update(FEModel* pmdl, unsigned int nwhen, void* pd)
+{
+	// get the optimizaton data
+	FEElemDataFilterSum& src = *((FEElemDataFilterSum*)pd);
+	src.update();
+
+	return true;
+}
+
+void FEElemDataFilterSum::update()
+{
+	// get the current time value
+	double time = m_fem.GetTime().currentTime;
+
+	FEMesh* mesh = m_elemSet->GetMesh();
+	FEElementSet& eset = *m_elemSet;
+	double sum = 0.0;
+	for (int i = 0; i < eset.Elements(); ++i)
+	{
+		double vi = m_data->value(eset.Element(i));
 		sum += vi;
 	}
 

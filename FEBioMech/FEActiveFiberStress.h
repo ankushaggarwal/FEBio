@@ -56,12 +56,11 @@ SOFTWARE.*/
 #include <FECore/tens4d.h>
 #include <FECore/FEFunction1D.h>
 
-
 //-----------------------------------------------------------------------------
 class FEActiveFiberStress : public FEElasticMaterial
 {
 public:
-	class Data : public FEMaterialPoint
+	class Data : public FEMaterialPointData
 	{
 	public:
 		double	m_lamp;
@@ -71,6 +70,8 @@ public:
 		{
 			// TODO:
 		}
+
+		void Serialize(DumpStream& ar) override;
 	};
 
 public:

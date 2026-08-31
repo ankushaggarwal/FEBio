@@ -1,15 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-mark_as_advanced(FORCE CMAKE_INSTALL_PREFIX)
 
 project(FEBio)
-set(FEBIO_LIBS FEBioFluid FEBioLib FEBioMech FEBioMix FEBioOpt FEBioPlot FEBioTest FEBioXML FECore NumCore FEAMR FEBioRVE)
+set(FEBIO_LIBS FEBioFluid FEBioLib FEBioMech FEBioMix FEBioOpt FECore NumCore FEAMR FEBioRVE FEImgLib FEBioPlot FEBioXML)
+set(STATIC_FEBIO_LIBS FEBioTest febcode)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_FILES_DIRECTORY ${CMAKE_BINARY_DIR}/CMakeFiles)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY AUTOGEN_TARGETS_FOLDER Autogen)
@@ -28,11 +27,14 @@ endif()
 
 ##### Set appropriate flag for operating system ####
 if(WIN32)
-	add_definitions(-DWIN32)
+	add_definitions(-DWIN32 -DFECORE_DLL)
 elseif(APPLE)
     add_definitions(-D__APPLE__)
+    add_definitions(-DHAS_ACCEL)
 else()
 	add_definitions(-DLINUX)
+    
+    option(USE_STATIC_STDLIBS "Helps to create more portable binaries" ON)
 endif()
 
 ##### Search for library and include directories #####
@@ -71,12 +73,22 @@ if(USE_MKL)
     foreach(name IN LISTS MKL_LIB_NAMES)
         findLib(${name} MKL_LIB_DIR MKL_LIB)
         list(APPEND MKL_LIBS ${MKL_LIB})
-        unset(MMG_LIB)
+        unset(MKL_LIB)
     endforeach(name)
     
     if(NOT EXISTS ${MKL_OMP_LIB})
         message(SEND_ERROR "Could not find MKL OMP library. Check MKL_OMP_LIB.")
     endif()
+endif()
+
+if(USE_FFTW)
+	if(NOT EXISTS ${FFTW_LIB})
+		message(SEND_ERROR "Could not find FFTW library libfftw3-3. Check FFTW_LIB.")
+        message(SEND_ERROR "The library is " ${FFTW_LIB})
+	endif()
+	if(NOT EXISTS ${FFTW_INC}/fftw3.h)
+		message(SEND_ERROR "Could not find fftw3.h. Check FFTW_INC.")
+	endif()
 endif()
 
 if(USE_HYPRE)
@@ -88,9 +100,21 @@ if(USE_HYPRE)
 	endif()
 endif()
 
+if(USE_SUPERLU_MT)
+	if(NOT EXISTS ${SUPERLU_MT_LIB})
+		message(SEND_ERROR "Could not find SUPERLU_MT library. Check SUPERLU_MT_LIB.")
+	endif()
+	if(NOT EXISTS ${SUPERLU_MT_INC}/slu_mt_ddefs.h)
+		message(SEND_ERROR "Could not find slu_mt_ddefs.h. Check SUPERLU_MT_INC.")
+	endif()
+endif()
+
 if(USE_MMG)
 	if(NOT EXISTS ${MMG_LIB})
 		message(SEND_ERROR "Could not find MMG library. Check MMG_LIB.")
+	endif()
+    if(NOT EXISTS ${MMGS_LIB})
+		message(SEND_ERROR "Could not find MMGS library. Check MMGS_LIB.")
 	endif()
 	if(NOT EXISTS ${MMG_INC}/mmg/libmmg.h)
 		message(SEND_ERROR "Could not find libmmg.h. Check MMG_INC.")
@@ -106,6 +130,15 @@ if(USE_LEVMAR)
 	endif()
 endif()
 
+if(USE_NLOPT)
+	if(NOT EXISTS ${NLOPT_INC}/nlopt.h)
+		message(SEND_ERROR "Could not find nlopt.h. Check NLOPT_INC.")
+	endif()
+	if(NOT EXISTS ${NLOPT_LIB})
+		message(SEND_ERROR "Could not find NLOPT library. Check NLOPT_LIB.")
+	endif()
+endif()
+
 if(USE_ZLIB)
 	if(NOT EXISTS ${ZLIB_LIBRARY_RELEASE})
 		message(SEND_ERROR "Could not find ZLIB. Check ZLIB_LIBRARY_RELEASE.")
@@ -115,49 +148,15 @@ if(USE_ZLIB)
 	endif()
 endif()
 
-##### Set appropriate defines and includes #####
-include_directories(${PROJECT_SOURCE_DIR})
-
-if(USE_MKL)
-	add_definitions(-DMKL_ISS)
-	add_definitions(-DPARDISO)
-	include_directories(${MKL_INC})
-endif(USE_MKL)
-
-if(USE_HYPRE)
-	add_definitions(-DHYPRE)
-	include_directories(${HYPRE_INC})
-endif(USE_HYPRE)
-
-if(USE_MMG)
-	add_definitions(-DHAS_MMG)
-	include_directories(${MMG_INC})
-endif(USE_MMG)
-
-if(USE_LEVMAR)
-	add_definitions(-DHAVE_LEVMAR)
-	include_directories(${LEVMAR_INC})
-endif(USE_LEVMAR)
-
-if(USE_ZLIB)
-	add_definitions(-DHAVE_ZLIB)
-	include_directories(${ZLIB_INCLUDE_DIR})
-endif(USE_ZLIB)
-
 ##### Set up compiler flags #####
 if(WIN32)
-    add_compile_options(/MP /openmp)
+    add_compile_options(/MP /wd4996 /wd4251 /wd4275)
 elseif(APPLE)
-	add_compile_options(-fPIC -w)
+    set(CMAKE_BUILD_RPATH @executable_path/../lib/;@executable_path/../Frameworks)
+    set(OMP_INC "" CACHE PATH "Path to the OMP include directory")
+    mark_as_advanced(OMP_INC)
 else()
-	add_compile_options(-fPIC -fopenmp -w)
-    
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
-    
-    # Extra compiler flags for intel compiler
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-intel")
-    endif()
+	add_compile_options(-fopenmp -w)
     
     set(CMAKE_BUILD_RPATH_USE_LINK_PATH FALSE)
     set(CMAKE_BUILD_RPATH $ORIGIN/../lib/)
@@ -177,29 +176,61 @@ endif()
 ##### Find Source Files #####
 
 macro(findHdrSrc name)
-	file(GLOB HDR_${name} "${name}/*.h")
+	file(GLOB HDR_${name} "${name}/*.h*")
 	file(GLOB SRC_${name} "${name}/*.cpp")
 endmacro()
-
-findHdrSrc(FEBioStudio)
 
 foreach(name IN LISTS FEBIO_LIBS)
 	findHdrSrc(${name})
 endforeach(name)
 
-macro(addLib name)
+foreach(name IN LISTS STATIC_FEBIO_LIBS)
+	findHdrSrc(${name})
+endforeach(name)
+
+
+macro(addLib name TYPE)
     string(TOLOWER ${name} lname)
-	add_library(${lname} ${HDR_${name}} ${SRC_${name}})
+	add_library(${lname} ${TYPE} ${HDR_${name}} ${SRC_${name}})
 	set_property(TARGET ${lname} PROPERTY AUTOGEN_BUILD_DIR ${CMAKE_BINARY_DIR}/CMakeFiles/AutoGen/${name}_autogen)
+    
+    if(NOT WIN32)
+        set_property(TARGET ${lname} PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+    
+    if(APPLE)
+        target_link_libraries(${lname} PRIVATE "-undefined dynamic_lookup")
+    endif()
 endmacro()
 
 foreach(name IN LISTS FEBIO_LIBS)
-	addLib(${name})
+	addLib(${name} SHARED)
+endforeach(name)
+
+foreach(name IN LISTS STATIC_FEBIO_LIBS)
+	addLib(${name} STATIC)
 endforeach(name)
 
 ##### Set up executable compilation #####
-file(GLOB SOURCES "FEBio3/*.cpp")
-add_executable (febio3 ${SOURCES})
+file(GLOB HEADERS "FEBio/*.h")
+file(GLOB SOURCES "FEBio/*.cpp")
+add_executable (febio4 ${HEADERS} ${SOURCES})
+
+if(WIN32)
+    target_compile_options(febio4 PRIVATE /openmp)
+    target_compile_options(febiofluid PRIVATE /openmp)
+    target_compile_options(febiolib PRIVATE /openmp)
+    target_compile_options(febiomech PRIVATE /openmp)
+    target_compile_options(febiomix PRIVATE /openmp)
+    target_compile_options(febioopt PRIVATE /openmp)
+    target_compile_options(fecore PRIVATE /openmp)
+    target_compile_options(feamr PRIVATE /openmp)
+    target_compile_options(febiorve PRIVATE /openmp)
+    target_compile_options(feimglib PRIVATE /openmp)
+    target_compile_options(febioplot PRIVATE /openmp)
+    target_compile_options(febiotest PRIVATE /openmp)
+    target_compile_options(febioxml PRIVATE /openmp)
+endif()
 
 ##### Set dev commit information #####
 
@@ -221,7 +252,8 @@ macro(crossExecProcess OUT)
 endmacro()
 
 # Check for git and give warning if not available
-if(EXISTS ${CMAKE_SOURCE_DIR}/.git)
+option(SET_DEVCOMMIT "Set the DEVCOMMIT macro with git commit hash" ON)
+if(${SET_DEVCOMMIT} AND EXISTS ${CMAKE_SOURCE_DIR}/.git)
     if(WIN32)
         set(CMD where git)
     else()
@@ -235,10 +267,10 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/.git)
         set(CMD git rev-parse --abbrev-ref HEAD)
         crossExecProcess(BRANCH_NAME)
 
-        string(COMPARE EQUAL ${BRANCH_NAME} "develop" ISDEVELOP)
+        string(COMPARE EQUAL ${BRANCH_NAME} "master" ISMASTER)
         
         # Get the commit info and set the DEVCOMMIT macro
-        if(SUCCESS EQUAL 0 AND ISDEVELOP)
+        if(SUCCESS EQUAL 0 AND NOT ISMASTER)
             
             set(CMD git rev-parse --short=9 HEAD)
             crossExecProcess(DEVCOMMIT)
@@ -252,16 +284,13 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/.git)
     endif()
 endif()
 
-##### Linking options #####
+##### Temp fix for Gerard to fix HYPRE's MPI include problem #####
+set(EXTRA_INC "" CACHE STRING "Enter extra include paths separated by spaces")
+set(EXTRA_LIB "" CACHE STRING "Enter extra library paths separated by spaces")
+mark_as_advanced(EXTRA_INC)
 
-# Link FEBio libraries
-if(WIN32 OR APPLE)
-	target_link_libraries(febio3 fecore febiolib febioplot febiomech 
-		febiomix febioxml numcore febioopt febiotest febiofluid feamr febiorve)
-else()
-	target_link_libraries(febio3 -Wl,--start-group fecore febiolib febioplot febiomech 
-		febiomix febioxml numcore febioopt febiotest febiofluid feamr febiorve -Wl,--end-group)
-endif()
+##### Setup includes, defnitions, and linking options #####
+include_directories(${PROJECT_SOURCE_DIR})
 
 if(APPLE)
     set(CMAKE_FRAMEWORK_LINK_FLAGS "-Wl,-framework")
@@ -271,62 +300,191 @@ endif()
 
 # Link LEVMAR
 if(USE_LEVMAR)
-	target_link_libraries(febio3 ${LEVMAR_LIB})
+	target_include_directories(febioopt PRIVATE ${LEVMAR_INC})
+    target_compile_definitions(febioopt PRIVATE HAVE_LEVMAR)
+    target_link_libraries(febioopt PRIVATE ${LEVMAR_LIB})
+endif()
+
+# Link NLOPT
+if(USE_NLOPT)
+	target_include_directories(febioopt PRIVATE ${NLOPT_INC})
+    target_compile_definitions(febioopt PRIVATE HAVE_NLOPT)
+    target_link_libraries(febioopt PRIVATE ${NLOPT_LIB})
+endif()
+
+# Link FFTW
+if(USE_FFTW)
+    target_include_directories(feimglib PRIVATE ${FFTW_INC})
+    target_compile_definitions(feimglib PRIVATE HAVE_FFTW)
+    target_link_libraries(feimglib PRIVATE ${FFTW_LIB})
 endif()
 
 # Link HYPRE
 if(USE_HYPRE)
-	target_link_libraries(febio3 ${HYPRE_LIB})
+    target_include_directories(numcore PRIVATE ${HYPRE_INC})
+    target_compile_definitions(numcore PRIVATE HYPRE)
+    target_link_libraries(numcore PRIVATE ${HYPRE_LIB})
+endif()
+
+# Link SuperLU_MT
+if(USE_SUPERLU_MT)
+	target_include_directories(numcore PRIVATE ${SUPERLU_MT_INC})
+    target_compile_definitions(numcore PRIVATE HAVE_SUPERLU_MT)
+    if(APPLE)
+        target_compile_definitions(numcore PRIVATE _PTHREAD)
+    endif()
+    target_link_libraries(numcore PRIVATE ${SUPERLU_MT_LIB})
 endif()
 
 # Link MKL
 if(USE_MKL)
+    target_include_directories(numcore PRIVATE ${MKL_INC} ${OpenMP_C_LIBRARIES})
+    target_compile_definitions(numcore PRIVATE MKL_ISS PARDISO)
+    
+    target_include_directories(febioopt PRIVATE ${MKL_INC})
+	target_compile_definitions(febioopt PRIVATE MKL_ISS PARDISO)
+
     if(WIN32 OR APPLE)
-        target_link_libraries(febio3 ${MKL_LIBS} ${MKL_OMP_LIB})
+        target_link_libraries(numcore PRIVATE ${MKL_OMP_LIB} ${MKL_LIBS})
+        target_link_libraries(febioopt PRIVATE ${MKL_OMP_LIB} ${MKL_LIBS})
     else()
-        target_link_libraries(febio3 -Wl,--start-group ${MKL_LIBS} ${MKL_OMP_LIB} -Wl,--end-group)
+        target_link_libraries(numcore PRIVATE -Wl,--start-group ${MKL_OMP_LIB} ${MKL_LIBS} -Wl,--end-group)
+        target_link_libraries(febioopt PRIVATE -Wl,--start-group ${MKL_OMP_LIB} ${MKL_LIBS} -Wl,--end-group)
+    endif()
+    
+    if(FORCE_SYSTEM_OMP)
+        target_link_libraries(numcore PRIVATE ${OpenMP_C_LIBRARIES})
+        target_link_libraries(febioopt PRIVATE ${OpenMP_C_LIBRARIES})
     endif()
 else()
     # If not using MKL, we still need OpenMP from the system.
     if(${OpenMP_C_FOUND})
-        target_link_libraries(febio3 ${OpenMP_C_LIBRARIES})
+        target_link_libraries(numcore PRIVATE ${OpenMP_C_LIBRARIES})
+        target_link_libraries(febioopt PRIVATE ${OpenMP_C_LIBRARIES})
     endif()
 endif()
 
-if(WIN32)
-	target_link_libraries(febio3 psapi.lib ws2_32.lib)
-else()
-    target_link_libraries(febio3 -pthread -ldl)
+# Manually pull in include dirs for OpenMP on macOS
+if(APPLE)
+    target_include_directories(febiomech PRIVATE ${OpenMP_C_INCLUDE_DIRS} ${OMP_INC})
+endif()
+
+# Link Pardiso-project
+if(USE_PDL)
+    target_compile_definitions(numcore PRIVATE PARDISODL)
+    target_link_libraries(numcore PRIVATE ${PDL_LIB})
+    set(ENV{PARDISOLICMESSAGE} "1")
+
+    # We still need OpenMP from the system.
+    if(${OpenMP_C_FOUND})
+        target_link_libraries(numcore PRIVATE ${OpenMP_C_LIBRARIES})
+        target_link_libraries(febioopt PRIVATE ${OpenMP_C_LIBRARIES})
+    endif()
+endif()
+
+# Link Accelerate framework
+if (APPLE)
+  target_link_libraries(numcore PRIVATE "-framework Accelerate")
 endif()
 
 # Link MMG
 if(USE_MMG)
-	target_link_libraries(febio3 ${MMG_LIB})
+	target_include_directories(feamr PRIVATE ${MMG_INC})
+    target_compile_definitions(feamr PRIVATE HAS_MMG)
+    target_link_libraries(feamr PRIVATE ${MMG_LIB} ${MMGS_LIB})
 endif()
 
 # Link ZLIB
 if(USE_ZLIB)
-	target_link_libraries(febio3 ${ZLIB_LIBRARY_RELEASE})
+    target_include_directories(febioplot PRIVATE ${ZLIB_INCLUDE_DIR})
+    target_compile_definitions(febioplot PRIVATE HAVE_ZLIB)
+	target_link_libraries(febioplot PRIVATE ${ZLIB_LIBRARY_RELEASE})
 endif()
 
-##### Create febio.xml #####
-if(NOT EXISTS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/febio.xml)
-    file(WRITE ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/febio.xml "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>
-<febio_config version=\"3.0\">
-    <default_linear_solver type=\"pardiso\"></default_linear_solver>
-</febio_config>")
-endif()
+# Extra Includes
+target_include_directories(febioopt PRIVATE ${EXTRA_INC})
+target_include_directories(numcore PRIVATE ${EXTRA_INC})
+target_include_directories(feamr PRIVATE ${EXTRA_INC})
+target_include_directories(febiolib PRIVATE ${EXTRA_INC})
 
-if(USE_MKL)
-    file(READ ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/febio.xml filedata)
-    string(REGEX REPLACE "type=\"[a-z]*\"" "type=\"pardiso\"" filedata ${filedata})
-    file(WRITE ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/febio.xml ${filedata})
+# Extra Libs
+target_link_libraries(numcore PRIVATE ${EXTRA_LIB})
+
+
+if(WIN32)
+	target_link_libraries(febio4 psapi.lib ws2_32.lib)
 else()
-    file(READ ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/febio.xml filedata)
-    string(REGEX REPLACE "type=\"[a-z]*\"" "type=\"skyline\"" filedata "${filedata}")
-    file(WRITE ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/febio.xml "${filedata}")
+    target_link_libraries(febio4 -ldl)
 endif()
 
+# Link Libraries into FEBioLib
+target_link_libraries(numcore PRIVATE fecore)
+target_link_libraries(febioxml PRIVATE fecore)
+target_link_libraries(febiotest PRIVATE fecore)
+target_link_libraries(febioplot PRIVATE fecore)
+target_link_libraries(feimglib PRIVATE fecore)
+target_link_libraries(feamr PRIVATE fecore)
+target_link_libraries(febiorve PRIVATE fecore febiomech febioxml febioplot)
+target_link_libraries(febioopt PRIVATE fecore febioxml febioplot)
+target_link_libraries(febiomix PRIVATE febiomech fecore)
+target_link_libraries(febiomech PRIVATE fecore feamr)
+target_link_libraries(febiofluid PRIVATE febiomix febiomech fecore)
 
-get_target_property(LINKEDLIBS febio3 LINK_LIBRARIES)
+target_link_libraries(febiolib PRIVATE febioplot febiomech 
+		febiomix febioxml numcore febioopt febiotest febiofluid feamr febiorve fecore feimglib)
 
+# pull febcode into FECore
+target_link_libraries(fecore PRIVATE febcode)
+
+if (WIN32)
+    target_link_libraries(febiolib PRIVATE psapi.lib)
+endif()
+
+# Link FEBio libraries
+if(WIN32 OR APPLE)
+	target_link_libraries(febio4 fecore febiolib)
+else()
+    if(USE_STATIC_STDLIBS)
+        target_link_libraries(numcore PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febioxml PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febiotest PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febiorve PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febioplot PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febioopt PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febiomix PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febiomech PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febiofluid PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(feimglib PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(feamr PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_libraries(febiolib PRIVATE -static-libstdc++ -static-libgcc stdc++fs)
+        target_link_libraries(fecore PRIVATE -static-libstdc++ -static-libgcc stdc++fs)
+        
+        target_link_libraries(febio4 -static-libstdc++ -static-libgcc)
+    endif()
+
+	target_link_libraries(febio4 -Wl,--start-group fecore febiolib -Wl,--end-group)
+    
+    # Extra compiler flags for intel compiler
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+        target_link_libraries(febio4 -static-intel)
+    endif()
+endif()
+
+#### Set up installation #####
+install(TARGETS febio4 numcore febioxml febiotest febiorve febioplot febioopt
+    febiomix febiomech febiofluid feamr feimglib fecore febiolib
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    )
+
+install(DIRECTORY 
+    FEBio NumCore FECore FEAMR FEImgLib FEBioFluid FEBioLib FEBioMech FEBioMix
+    FEBioOpt FEBioRVE FEBioPlot FEBioTest FEBioXML
+    DESTINATION include
+    FILES_MATCHING PATTERN "*.h*"
+    )
+
+install(FILES FEBioConfig.cmake 
+    DESTINATION lib/cmake/FEBio
+)

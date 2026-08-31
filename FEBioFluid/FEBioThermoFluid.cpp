@@ -33,17 +33,30 @@ SOFTWARE.*/
 #include "FEThermoFluid.h"
 #include "FEThermoFluidDomain3D.h"
 #include "FEThermoFluidDomainFactory.h"
+#include "FEFixedFluidTemperature.h"
+#include "FEInitialFluidTemperature.h"
+#include "FEInitialFluidPressureTemperature.h"
+#include "FEPrescribedFluidTemperature.h"
+#include "FEFluidHeatSupplyConst.h"
 #include "FEFluidNormalHeatFlux.h"
+#include "FEFluidNaturalHeatFlux.h"
+#include "FENewtonianThermoFluid.h"
+#include "FENewtonianRealVapor.h"
 #include "FEIdealGas.h"
 #include "FERealGas.h"
-#include "FEIdealLiquid.h"
+#include "FERealVapor.h"
 #include "FERealLiquid.h"
 #include "FEFluidConstantConductivity.h"
 #include "FETempDependentConductivity.h"
+#include "FEConductivityRealVapor.h"
 #include "FEThermoFluidPressureLoad.h"
 #include "FETemperatureBackFlowStabilization.h"
+#include "FEThermoFluidPressureBC.h"
+#include "FEThermoFluidTemperatureBC.h"
+#include "FEFluidModule.h"
+#include "FEThermoFluidAnalysis.h"
+#include "FEBioThermoFluidPlot.h"
 
-//-----------------------------------------------------------------------------
 const char* FEBioThermoFluid::GetVariableName(FEBioThermoFluid::THERMOFLUID_VARIABLE var)
 {
     switch (var)
@@ -51,8 +64,8 @@ const char* FEBioThermoFluid::GetVariableName(FEBioThermoFluid::THERMOFLUID_VARI
     case DISPLACEMENT                : return "displacement"               ; break;
     case RELATIVE_FLUID_VELOCITY     : return "relative fluid velocity"    ; break;
     case RELATIVE_FLUID_ACCELERATION : return "relative fluid acceleration"; break;
-    case FLUID_DILATATION            : return "fluid dilation"             ; break;
-    case FLUID_DILATATION_TDERIV     : return "fluid dilation tderiv"      ; break;
+    case FLUID_DILATATION            : return "fluid dilatation"           ; break;
+    case FLUID_DILATATION_TDERIV     : return "fluid dilatation tderiv"    ; break;
     case TEMPERATURE                 : return "temperature"                ; break;
     case TEMPERATURE_TDERIV          : return "temperature tderiv"         ; break;
     }
@@ -68,25 +81,78 @@ void FEBioThermoFluid::InitModule()
     febio.RegisterDomain(new FEThermoFluidDomainFactory);
 
     // define the thermo-fluid module
-    febio.CreateModule("thermo-fluid");
-    febio.SetModuleDependency("fluid");
+    febio.CreateModule(new FEThermoFluidModule, "thermo-fluid",
+                       "{"
+                       "   \"title\" : \"Thermofluid\","
+                       "   \"info\"  : \"Fluid analysis with heat transfer and thermodynamics.\""
+                       "}");
+    febio.AddModuleDependency("fluid");
 
+    //-----------------------------------------------------------------------------
+    // analysis classes (default type must match module name!)
+    REGISTER_FECORE_CLASS(FEThermoFluidAnalysis, "thermo-fluid");
+
+    //-----------------------------------------------------------------------------
     REGISTER_FECORE_CLASS(FEThermoFluidSolver, "thermo-fluid");
 
     REGISTER_FECORE_CLASS(FEThermoFluid, "thermo-fluid");
 
     REGISTER_FECORE_CLASS(FEThermoFluidDomain3D, "thermo-fluid-3D");
 
+    //-----------------------------------------------------------------------------
+    // initial conditions
+    REGISTER_FECORE_CLASS(FEInitialFluidTemperature  , "initial fluid temperature");
+    REGISTER_FECORE_CLASS(FEInitialFluidPressureTemperature  , "initial fluid pressure and temperature");
+
+    //-----------------------------------------------------------------------------
+    // boundary conditions
+    REGISTER_FECORE_CLASS(FEFixedFluidTemperature       , "zero fluid temperature"      );
+    REGISTER_FECORE_CLASS(FEPrescribedFluidTemperature  , "prescribed fluid temperature");
+    REGISTER_FECORE_CLASS(FEThermoFluidPressureBC       , "fluid pressure");
+    REGISTER_FECORE_CLASS(FEThermoFluidTemperatureBC    , "natural temperature");
+
+    //-----------------------------------------------------------------------------
+    // Surface loads
     REGISTER_FECORE_CLASS(FEFluidNormalHeatFlux, "fluid heat flux");
+    REGISTER_FECORE_CLASS(FEFluidNaturalHeatFlux, "fluid natural heat flux");
     REGISTER_FECORE_CLASS(FETemperatureBackFlowStabilization, "temperature backflow stabilization");
 
+    //-----------------------------------------------------------------------------
+    // Body loads
+    REGISTER_FECORE_CLASS(FEFluidHeatSupplyConst   , "constant fluid heat supply");
+    
+    //-----------------------------------------------------------------------------
+    // Materials
+    
+    // viscous thermofluids
+    REGISTER_FECORE_CLASS(FENewtonianThermoFluid, "Newtonian fluid");
+    REGISTER_FECORE_CLASS(FENewtonianRealVapor, "Newtonian real vapor");
+
+    // elastic fluids
     REGISTER_FECORE_CLASS(FEIdealGas   , "ideal gas"   );
     REGISTER_FECORE_CLASS(FERealGas    , "real gas"    );
-    REGISTER_FECORE_CLASS(FEIdealLiquid, "ideal liquid");
+    REGISTER_FECORE_CLASS(FERealVapor  , "real vapor"  );
     REGISTER_FECORE_CLASS(FERealLiquid , "real liquid" );
+    
+    // thermal conductivity
     REGISTER_FECORE_CLASS(FEFluidConstantConductivity, "constant thermal conductivity");
     REGISTER_FECORE_CLASS(FETempDependentConductivity, "temp-dependent thermal conductivity");
-    REGISTER_FECORE_CLASS(FEThermoFluidPressureLoad, "fluid pressure");
+    REGISTER_FECORE_CLASS(FEConductivityRealVapor    , "real vapor thermal conductivity");
+    
+    //-----------------------------------------------------------------------------
+    // loads
+    REGISTER_FECORE_CLASS(FEThermoFluidPressureLoad, "fluid pressure constraint");
 
-    febio.SetActiveModule(0);
+    //-----------------------------------------------------------------------------
+    // classes derived from FEPlotData
+	REGISTER_FECORE_CLASS(FEPlotFluidTemperature, "fluid temperature");
+	REGISTER_FECORE_CLASS(FEPlotNodalFluidTemperature, "nodal fluid temperature");
+	REGISTER_FECORE_CLASS(FEPlotFluidPressureTangentTemperature, "fluid pressure tangent temperature");
+	REGISTER_FECORE_CLASS(FEPlotFluidRelativeThermalPecletNumber, "fluid relative thermal Peclet number");
+	REGISTER_FECORE_CLASS(FEPlotFluidIsochoricSpecificHeatCapacity, "fluid isochoric specific heat capacity");
+	REGISTER_FECORE_CLASS(FEPlotFluidIsobaricSpecificHeatCapacity, "fluid isobaric specific heat capacity");
+	REGISTER_FECORE_CLASS(FEPlotFluidThermalConductivity, "fluid thermal conductivity");
+	REGISTER_FECORE_CLASS(FEPlotFluidHeatFlux, "fluid heat flux");
+
+	febio.SetActiveModule(0);
 }

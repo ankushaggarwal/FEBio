@@ -28,12 +28,11 @@ SOFTWARE.*/
 
 #pragma once
 #include "FESolver.h"
-#include "FEModelComponent.h"
+#include "FEStepComponent.h"
 #include "FEGlobalVector.h"
 #include "FEGlobalMatrix.h"
 #include "FETimeInfo.h"
 #include <vector>
-using namespace std;
 
 //-----------------------------------------------------------------------------
 // forward declaration of the model class
@@ -46,9 +45,10 @@ class FELinearSystem;
 //! The constraint must provide a residual (force) contribution, its stiffness matrix,
 //! and an augmentation function.
 //!
-class FECORE_API FENLConstraint : public FEModelComponent
+class FECORE_API FENLConstraint : public FEStepComponent
 {
-	FECORE_SUPER_CLASS
+	FECORE_SUPER_CLASS(FENLCONSTRAINT_ID)
+	FECORE_BASE_CLASS(FENLConstraint);
 
 public:
 	FENLConstraint(FEModel* pfem);
@@ -83,7 +83,8 @@ public:
 
 	// update 
 	using FEModelComponent::Update;
-	virtual void Update(const std::vector<double>& ui) {}
-	virtual void Update(const std::vector<double>& Ui, const std::vector<double>& ui) { Update(ui); }
+
+	// update for Lagrange Multiplier implementations
+	virtual void Update(const std::vector<double>& Ui, const std::vector<double>& ui) {}
 	virtual void UpdateIncrements(std::vector<double>& Ui, const std::vector<double>& ui) {}
 };

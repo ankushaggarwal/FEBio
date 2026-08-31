@@ -62,6 +62,9 @@ public:
     //! Generate warnings if needed
     void SolverWarnings();
     
+	//! preferred matrix type should be unsymmetric.
+	Matrix_Type PreferredMatrixType() const override { return REAL_UNSYMMETRIC; };
+
 public:
     //{ --- evaluation and update ---
     //! Perform an update
@@ -69,10 +72,6 @@ public:
     
     //! update nodal positions, velocities, accelerations, etc.
     void UpdateKinematics(vector<double>& ui);
-    
-    void UpdateModel() override;
-    void UpdateContact();
-    void UpdateConstraints();
     
     //! Update EAS
     void UpdateEAS(vector<double>& ui);
@@ -137,7 +136,6 @@ public:
     vector<int> m_nceq;     //!< number of equations related to concentration dofs
     
 public:
-    vector<double> m_Fn;    //!< concentrated nodal force vector
     vector<double> m_Fr;    //!< nodal reaction forces
     vector<double> m_di;    //!< displacement increment vector
     vector<double> m_Di;    //!< Total displacement vector for iteration

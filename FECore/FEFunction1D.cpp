@@ -34,8 +34,6 @@ SOFTWARE.*/
 #include "MObj2String.h"
 #include "log.h"
 
-REGISTER_SUPER_CLASS(FEFunction1D, FEFUNCTION1D_ID);
-
 FEFunction1D::FEFunction1D(FEModel* fem) : FECoreBase(fem)
 {
 }
@@ -107,6 +105,16 @@ bool FEFunction1D::invert(const double f0, double &x)
     
     return cnvgd;
 }
+
+//=============================================================================
+BEGIN_FECORE_CLASS(FEConstFunction, FEFunction1D)
+	ADD_PARAMETER(m_value, "value");
+END_FECORE_CLASS();
+
+//=============================================================================
+BEGIN_FECORE_CLASS(FEScaleFunction, FEFunction1D)
+	ADD_PARAMETER(m_scale, "scale");
+END_FECORE_CLASS();
 
 //=============================================================================
 BEGIN_FECORE_CLASS(FELinearFunction, FEFunction1D)

@@ -31,7 +31,7 @@ SOFTWARE.*/
 #include <FECore/FEModel.h>
 #include <FECore/log.h>
 
-FEMaterialPoint* FEDonnanEquilibriumMaterialPoint::Copy()
+FEMaterialPointData* FEDonnanEquilibriumMaterialPoint::Copy()
 {
     FEDonnanEquilibriumMaterialPoint* pt = new FEDonnanEquilibriumMaterialPoint(*this);
     if (m_pNext) pt->m_pNext = m_pNext->Copy();
@@ -40,7 +40,7 @@ FEMaterialPoint* FEDonnanEquilibriumMaterialPoint::Copy()
 
 void FEDonnanEquilibriumMaterialPoint::Init()
 {
-    FEMaterialPoint::Init();
+	FEMaterialPointData::Init();
     
     // intialize data to zero
     m_cF = 0;
@@ -49,22 +49,10 @@ void FEDonnanEquilibriumMaterialPoint::Init()
     m_bpi = 0;
 }
 
-void FEDonnanEquilibriumMaterialPoint::Update(const FETimeInfo& timeInfo)
-{
-    FEMaterialPoint::Update(timeInfo);
-}
-
 void FEDonnanEquilibriumMaterialPoint::Serialize(DumpStream& ar)
 {
-    if (ar.IsSaving())
-    {
-        ar << m_cF << m_osm << m_p << m_bpi;
-    }
-    else
-    {
-        ar >> m_cF >> m_osm >> m_p >> m_bpi;
-    }
-    FEMaterialPoint::Serialize(ar);
+	FEMaterialPointData::Serialize(ar);
+	ar & m_cFr & m_cF & m_osm & m_p & m_bpi;
 }
 
 //-----------------------------------------------------------------------------
@@ -72,10 +60,8 @@ void FEDonnanEquilibriumMaterialPoint::Serialize(DumpStream& ar)
 BEGIN_FECORE_CLASS(FEDonnanEquilibrium, FEElasticMaterial)
 	ADD_PARAMETER(m_phiwr, FE_RANGE_LEFT_OPEN(0.0, 1.0), "phiw0");
     ADD_PARAMETER(m_phisr, "phis0");
-	ADD_PARAMETER(m_cFr  , "cF0");
-	ADD_PARAMETER(m_Rgas , "R");
-	ADD_PARAMETER(m_Tabs , "T");
-	ADD_PARAMETER(m_bosm , FE_RANGE_GREATER_OR_EQUAL(0.0), "bosm");
+	ADD_PARAMETER(m_cFr  , "cF0")->setUnits(UNIT_CONCENTRATION);
+	ADD_PARAMETER(m_bosm , FE_RANGE_GREATER_OR_EQUAL(0.0), "bosm")->setUnits(UNIT_CONCENTRATION);
     ADD_PARAMETER(m_Phi  , FE_RANGE_GREATER_OR_EQUAL(0.0), "Phi");
 END_FECORE_CLASS();
 
@@ -105,6 +91,12 @@ bool FEDonnanEquilibrium::Init()
 	if (m_Tabs <= 0) { feLogError("A positive absolute temperature T must be defined in Globals section");   return false; }
 	
 	return FEElasticMaterial::Init();
+}
+
+void FEDonnanEquilibrium::Serialize(DumpStream& ar)
+{
+	FEElasticMaterial::Serialize(ar);
+	ar & m_Rgas & m_Tabs & m_binit & m_bnew & m_phiwr;
 }
 
 //-----------------------------------------------------------------------------

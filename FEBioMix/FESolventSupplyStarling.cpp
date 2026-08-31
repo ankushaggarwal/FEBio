@@ -36,10 +36,8 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FESolventSupplyStarling, FESolventSupply)
-	ADD_PARAMETER(m_kp, "kp");
-	ADD_PARAMETER(m_pv, "pv");
-	ADD_PARAMETER(m_qctmp, "qc");
-	ADD_PARAMETER(m_cvtmp, "cv");
+	ADD_PARAMETER(m_kp, "kp")->setLongName("hydraulic filtration coefficient, $k_p$")->setUnits("L^2/F.t");
+	ADD_PARAMETER(m_pv, "pv")->setLongName("fluid pressure in external source, $p_v$")->setUnits(UNIT_PRESSURE);
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -50,43 +48,18 @@ FESolventSupplyStarling::FESolventSupplyStarling(FEModel* pfem) : FESolventSuppl
 	m_pv = 0;
 
     // get number of DOFS
-	DOFS& fedofs = pfem->GetDOFS();
-    int MAX_CDOFS = fedofs.GetVariableSize("concentration");
-    
-    if (MAX_CDOFS > 0) {
-        m_qc.assign(MAX_CDOFS,0);
-        m_cv.assign(MAX_CDOFS,0);
-    }
-}
+	if (pfem)
+	{
+		DOFS& fedofs = pfem->GetDOFS();
+		int MAX_CDOFS = fedofs.GetVariableSize("concentration");
 
-//-----------------------------------------------------------------------------
-bool FESolventSupplyStarling::SetParameterAttribute(FEParam& p, const char* szatt, const char* szval)
-{
-    // get number of DOFS
-    DOFS& fedofs = GetFEModel()->GetDOFS();
-    int MAX_CDOFS = fedofs.GetVariableSize("concentration");
-    
-	if (strcmp(p.name(), "qc") == 0)
-	{
-		if (strcmp(szatt, "sol") == 0)
-		{
-			int id = atoi(szval) - 1;
-			if ((id < 0) || (id >= MAX_CDOFS)) return false;
-			SetIndexedParameter(m_qcinp, id, m_qctmp);
-			return true;
+		if (MAX_CDOFS > 0) {
+			FEParamDouble tmp;
+			tmp = 0;
+			m_qc.assign(MAX_CDOFS, tmp);
+			m_cv.assign(MAX_CDOFS, tmp);
 		}
 	}
-	else if (strcmp(p.name(), "cv") == 0)
-	{
-		if (strcmp(szatt, "sol") == 0)
-		{
-			int id = atoi(szval) - 1;
-			if ((id < 0) || (id >= MAX_CDOFS)) return false;
-			SetIndexedParameter(m_cvinp, id, m_cvtmp);
-			return true;
-		}
-	}
-	return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -97,13 +70,17 @@ double FESolventSupplyStarling::Supply(FEMaterialPoint& mp)
 	FESolutesMaterialPoint* mpt = mp.ExtractData<FESolutesMaterialPoint>();
 
 	// evaluate solvent supply from pressure drop
-	double phiwhat = m_kp*(m_pv - ppt.m_p);
+    double kp = m_kp(mp);
+    double pv = m_pv(mp);
+	double phiwhat = kp*(pv - ppt.m_p);
 	
 	// evaluate solvent supply from concentration drop
 	if (mpt) {
 		int nsol = mpt->m_nsol;
 		for (int isol=0; isol<nsol; ++isol) {
-			phiwhat += m_qc[isol]*(m_cv[isol] - mpt->m_c[isol]);
+            double qc = m_qc[isol](mp);
+            double cv = m_cv[isol](mp);
+			phiwhat += qc*(cv - mpt->m_c[isol]);
 		}
 	}
 	
@@ -123,7 +100,7 @@ mat3ds FESolventSupplyStarling::Tangent_Supply_Strain(FEMaterialPoint &mp)
 //! Tangent of solvent supply with respect to pressure
 double FESolventSupplyStarling::Tangent_Supply_Pressure(FEMaterialPoint &mp)
 {
-	return -m_kp;
+	return -m_kp(mp);
 }
 
 //-----------------------------------------------------------------------------
@@ -132,7 +109,7 @@ double FESolventSupplyStarling::Tangent_Supply_Concentration(FEMaterialPoint &mp
 {
 	FESolutesMaterialPoint& mpt = *mp.ExtractData<FESolutesMaterialPoint>();
 	if (isol < mpt.m_nsol) {
-		return -m_qc[isol];
+		return -m_qc[isol](mp);
 	}
 	
 	return 0;

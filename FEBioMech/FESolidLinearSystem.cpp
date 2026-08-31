@@ -31,8 +31,9 @@ SOFTWARE.*/
 #include <FECore/FELinearConstraintManager.h>
 #include <FECore/FEModel.h>
 
-FESolidLinearSystem::FESolidLinearSystem(FESolver* solver, FERigidSolver* rigidSolver, FEGlobalMatrix& K, std::vector<double>& F, std::vector<double>& u, bool bsymm, double alpha, int nreq) : FELinearSystem(solver, K, F, u, bsymm)
+FESolidLinearSystem::FESolidLinearSystem(FEModel* fem, FERigidSolver* rigidSolver, FEGlobalMatrix& K, std::vector<double>& F, std::vector<double>& u, bool bsymm, double alpha, int nreq) : FELinearSystem(fem, K, F, u, bsymm)
 {
+	m_fem = fem;
 	m_rigidSolver = rigidSolver;
 	m_alpha = alpha;
 	m_nreq = nreq;
@@ -73,11 +74,10 @@ void FESolidLinearSystem::Assemble(const FEElementMatrix& ke)
 		vector<double>& ui = m_u;
 
 		// adjust for linear constraints
-		FEModel* fem = m_solver->GetFEModel();
-		FELinearConstraintManager& LCM = fem->GetLinearConstraintManager();
+		FELinearConstraintManager& LCM = m_fem->GetLinearConstraintManager();
 		if (LCM.LinearConstraints() > 0)
 		{
-			#pragma omp critical 
+			#pragma omp critical (LCM_assemble)
 			LCM.AssembleStiffness(m_K, m_F, m_u, ke.Nodes(), ke.RowIndices(), ke.ColumnsIndices(), ke);
 		}
 
@@ -121,7 +121,7 @@ void FESolidLinearSystem::Assemble(const FEElementMatrix& ke)
 		}
 
 		// see if there are any rigid body dofs here
-		#pragma omp critical 
+		#pragma omp critical (rigidStiffness)
 		m_rigidSolver->RigidStiffness(m_K, m_u, m_F, ke, m_alpha);
 	}
 }

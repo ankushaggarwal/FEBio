@@ -28,43 +28,32 @@ SOFTWARE.*/
 
 #include "stdafx.h"
 #include "febio.h"
-#include <FEBioXML/XMLReader.h>
-#include <FEBioXML/xmltool.h>
+#include <FECore/XMLReader.h>
+#include <FECore/xmltool.h>
 #include <FECore/FEModel.h>
 #include <FECore/FECoreTask.h>
+#include <FECore/FEMaterial.h>
 #include <NumCore/MatrixTools.h>
 #include <FECore/LinearSolver.h>
+#include <FEBioTest/FEMaterialTest.h>
+#include <FECore/FEFilesystem.h>
 #include "plugin.h"
 #include <map>
 #include <iostream>
-
-#ifdef WIN32
-// TODO: This is deprecated and <filesystem> should be used instead when switching to C++17. At that point, also remove this define.
-// #include <filesystem>
-#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
-#include <experimental/filesystem>
-#endif
 
 #ifndef WIN32
 #include <dlfcn.h>
 #endif
 
-
-#ifdef WIN32
-extern "C" void __cdecl omp_set_num_threads(int);
-#else
-extern "C" void omp_set_num_threads(int);
-#endif
-
 namespace febio {
 
 	//-----------------------------------------------------------------------------
-	bool parse_tags(XMLTag& tag);
+	bool parse_tags(XMLTag& tag, bool readPlugins);
 	bool parse_default_linear_solver(XMLTag& tag);
 	bool parse_import(XMLTag& tag);
 	bool parse_import_folder(XMLTag& tag);
+    bool parse_repo_plugins(XMLTag& tag);
 	bool parse_set(XMLTag& tag);
-	bool parse_omp_num_threads(XMLTag& tag);
 	bool parse_output_negative_jacobians(XMLTag& tag);
 
 	// create a map for the variables (defined with set)
@@ -77,7 +66,6 @@ namespace febio {
 	{
 		vars.clear();
 
-		config.Defaults();
 		boutput = (config.m_noutput != 0);
 
 		// open the configuration file
@@ -88,9 +76,14 @@ namespace febio {
 			return false;
 		}
 
-		// unload all plugins	
-		FEBioPluginManager& pm = *FEBioPluginManager::GetInstance();
-		pm.UnloadAllPlugins();
+		bool readPlugins = config.readPlugins;
+
+		if (readPlugins)
+		{
+			// unload all plugins before reading new ones
+			FEBioPluginManager& pm = *FEBioPluginManager::GetInstance();
+			pm.UnloadAllPlugins();
+		}
 
 		// loop over all child tags
 		try
@@ -98,8 +91,8 @@ namespace febio {
 			// Find the root element
 			XMLTag tag;
 			if (xml.FindTag("febio_config", tag) == false) return false;
-
-			if (strcmp(tag.m_att[0].m_szatv, "3.0") == 0)
+			const char* szversion = tag.AttributeValue("version");
+			if (strcmp(szversion, "3.0") == 0)
 			{
 				if (!tag.isleaf())
 				{
@@ -110,34 +103,40 @@ namespace febio {
 						// parse the tags
 						if (tag == "if_debug")
 						{
-#ifdef _DEBUG
+#ifndef NDEBUG
 							++tag;
-							if (parse_tags(tag) == false) return false;
+							if (parse_tags(tag, readPlugins) == false) return false;
 							++tag;
 #else
-							xml.SkipTag(tag);
-#endif // DEBUG
+							tag.skip();
+#endif // NDEBUG
 						}
 						else if (tag == "if_release")
 						{
-#ifndef _DEBUG
+#ifdef NDEBUG
 							++tag;
-							if (parse_tags(tag) == false) return false;
+							if (parse_tags(tag, readPlugins) == false) return false;
 							++tag;
 #else
-							xml.SkipTag(tag);
-#endif // !_DEBUG
+							tag.skip();
+#endif // NDEBUG
 						}
 						else if (tag == "print_model_params")
 						{
 							tag.value(config.m_printParams);
-							++tag;
+						}
+						else if (tag == "show_warnings_and_errors")
+						{
+							tag.value(config.m_bshowErrors);
 						}
 						else
 						{
-							if (parse_tags(tag) == false) return false;
+							if (parse_tags(tag, readPlugins) == false) return false;
 						}
-					} while (!tag.isend());
+
+						++tag;
+					} 
+					while (!tag.isend());
 				}
 			}
 			else
@@ -163,7 +162,7 @@ namespace febio {
 	}
 
 	//-----------------------------------------------------------------------------
-	bool parse_tags(XMLTag& tag)
+	bool parse_tags(XMLTag& tag, bool readPlugins)
 	{
 		if (tag == "set")
 		{
@@ -175,23 +174,36 @@ namespace febio {
 		}
 		else if (tag == "import")
 		{
-			if (parse_import(tag) == false) return false;
+			if (readPlugins)
+			{
+				if (parse_import(tag) == false) return false;
+			}
+			else
+				tag.skip();
 		}
 		else if (tag == "import_folder")
 		{
-			if (parse_import_folder(tag) == false) return false;
+			if (readPlugins)
+			{
+				if (parse_import_folder(tag) == false) return false;
+			}
+			else tag.skip();
 		}
-		else if (tag == "omp_num_threads")
-		{
-			if (parse_omp_num_threads(tag) == false) return false;
-		}
+        else if (tag == "repo_plugin_xml")
+        {
+			if (readPlugins)
+			{
+				if (parse_repo_plugins(tag) == false) return false;
+			}
+			else
+				tag.skip();
+        }
 		else if (tag == "output_negative_jacobians")
 		{
 			if (parse_output_negative_jacobians(tag) == false) return false;
 		}
 		else throw XMLReader::InvalidTag(tag);
 
-		++tag;
 		return true;
 	}
 
@@ -207,20 +219,11 @@ namespace febio {
 	}
 
 	//-----------------------------------------------------------------------------
-	bool parse_omp_num_threads(XMLTag& tag)
-	{
-		int n;
-		tag.value(n);
-		omp_set_num_threads(n);
-		return true;
-	}
-
-	//-----------------------------------------------------------------------------
 	bool parse_output_negative_jacobians(XMLTag& tag)
 	{
 		int n;
 		tag.value(n);
-		NegativeJacobian::m_boutput = (n != 0);
+		NegativeJacobian::m_maxout = n;
 		return true;
 	}
 
@@ -230,7 +233,7 @@ namespace febio {
 		const char* szt = tag.AttributeValue("type");
 
 		// read the solver parameters
-		ClassDescriptor* cd = fexml::readParameterList(tag);
+		FEClassDescriptor* cd = fexml::readParameterList(tag);
 		if (cd == nullptr)
 		{
 			delete cd;
@@ -241,7 +244,6 @@ namespace febio {
 			// set this as the default solver
 			FECoreKernel& fecore = FECoreKernel::GetInstance();
 			fecore.SetDefaultSolver(cd);
-			if (boutput) fprintf(stderr, "Default linear solver: %s\n", fecore.GetLinearSolverType());
 		}
 
 		return true;
@@ -315,10 +317,26 @@ namespace febio {
 		bool bok = process_aliases(szbuf, szfolder);
 
 		// load the plugin
-		if (bok) febio::ImportPluginFolder(szbuf);
+		if (bok) bok = febio::ImportPluginFolder(szbuf);
 
 		return bok;
 	}
+
+    //-----------------------------------------------------------------------------
+    bool parse_repo_plugins(XMLTag& tag)
+    {
+        // get the file name
+		const char* szfile = tag.szvalue();
+
+		// process any aliases
+		char szbuf[1024] = { 0 };
+		bool bok = process_aliases(szbuf, szfile);
+
+		// load the plugin
+		if (bok) febio::ImportRepoPlugins(szbuf);
+
+		return bok;
+    }
 
 	//-----------------------------------------------------------------------------
 	const char* GetFileTitle(const char* szfile)
@@ -361,54 +379,92 @@ namespace febio {
 		return false;
 	}
 
-	//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 
-#ifdef WIN32
-	namespace fs = std::experimental::filesystem;
-
-	void ImportPluginFolder(const char* szfolder)
-	{
-		std::string path = szfolder;
-
-		// get the default (system-dependant) extension
-		std::wstring defExt = L".dll";
-		//	std::wstring defExt = L".dylib";
-		//	std::wstring defExt = L".so";
-
-		size_t extLength = defExt.length();
-
-		// loop over all the items in a directory
-		for (auto & p : fs::directory_iterator(path))
-		{
-			// only get regular files with the default extension 
-			if (p.status().type() == fs::file_type::regular)
-			{
-				std::wstring fileName = p.path();
-				size_t l = fileName.length();
-				if (l > extLength) {
-					std::wstring ext = fileName.substr(l - extLength, extLength);
-					if (ext == defExt)
-					{
-						// we can only deal with strings for now, so convert
-						std::string s = p.path().string<char>();
-
-						// try to load the plugin
-						ImportPlugin(s.c_str());
-					}
-				}
-			}
-		}
-	}
-#else
-void ImportPluginFolder(const char* szfolder)
+bool ImportPluginFolder(const char* szfolder)
 {
+    // get the default (system-dependant) extension
+    #ifdef WIN32
+        std::string extension = ".dll";
+    #elif __APPLE__
+        std::string extension = ".dylib";
+    #else
+        std::string extension = ".so";
+    #endif
+    
+    for (const auto& entry : fs::directory_iterator(szfolder)) 
+    {
+        if (fs::is_regular_file(entry.path()) && entry.path().extension() == extension)
+        {
+            // try to load the plugin
+            bool ok = ImportPlugin(entry.path().string().c_str());
+
+            if(!ok) return false;
+        }
+    }
+
+    return true;
 }
-#endif
+
+void ImportRepoPlugins(const char* szxmlFile)
+{
+    XMLReader xml;
+    if (xml.Open(szxmlFile))
+    {
+        XMLTag tag;
+
+        if(!xml.FindTag("plugins", tag)) return;
+
+        if(!tag.isleaf())
+        {
+            ++tag;
+            do
+            {
+                if(tag == "plugin")
+                {
+                    int ID = tag.AttributeValue("ID", 0);
+
+                    if(!tag.isleaf())
+                    {
+                        ++tag;
+                        do
+                        {
+                            if (tag == "file")
+                            {
+                                int main = tag.AttributeValue("main", 1);
+
+                                std::string filePath;
+                                tag.value(filePath);
+
+                                if(main == 1)
+                                {
+                                    ImportPlugin(filePath.c_str());
+                                }
+                            }
+                            ++tag;
+                        } while(!tag.isend());
+                    }
+                }
+                ++tag;
+            } while(!tag.isend());
+        }
+    }
+}
 
 //-----------------------------------------------------------------------------
-void SetOMPThreads(int n)
+FEBIOLIB_API const char* GetPluginName(int allocId)
 {
-	omp_set_num_threads(n);
+	FEBioPluginManager& pm = *FEBioPluginManager::GetInstance();
+
+	for (int i = 0; i < pm.Plugins(); ++i)
+	{
+		const FEBioPlugin& pi = pm.GetPlugin(i);
+		if (pi.GetAllocatorID() == allocId)
+		{
+			return pi.GetName();
+		}
+	}
+	return nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -447,6 +503,42 @@ FEBIOLIB_API bool SolveModel(FEBioModel& fem, const char* sztask, const char* sz
 	return bret;
 }
 
+//-----------------------------------------------------------------------------
+// run an FEBioModel
+FEBIOLIB_API int RunModel(FEBioModel& fem, CMDOPTIONS* ops)
+{
+	// set options that were passed on the command line
+	if (ops)
+	{
+		fem.SetDebugLevel(ops->ndebug);
+		fem.SetDumpLevel(ops->dumpLevel);
+
+		// set the output filenames
+		fem.SetLogFilename(ops->szlog);
+		fem.SetPlotFilename(ops->szplt);
+		fem.SetDumpFilename(ops->szdmp);
+	}
+
+	// read the input file if specified
+	int nret = 0;
+	if (ops && ops->szfile[0])
+	{
+		// read the input file
+		if (fem.Input(ops->szfile) == false) nret = 1;
+	}
+
+	// solve the model with the task and control file
+	if (nret == 0)
+	{
+		const char* sztask = (ops && ops->sztask[0] ? ops->sztask : nullptr);
+		const char* szctrl = (ops && ops->szctrl[0] ? ops->szctrl : nullptr);
+		bool b = febio::SolveModel(fem, sztask, szctrl);
+		nret = (b ? 0 : 1);
+	}
+
+	return nret;
+}
+
 // write a matrix to file
 bool write_hb(CompactMatrix& K, const char* szfile, int mode)
 {
@@ -463,6 +555,43 @@ void print_svg(CompactMatrix* m, std::ostream &out, int i0, int j0, int i1, int 
 bool write_vector(const vector<double>& a, const char* szfile, int mode)
 {
 	return NumCore::write_vector(a, szfile, mode);
+}
+
+bool RunMaterialTest(FEMaterial* mat, double simtime, int steps, double strain, const char* sztest, std::vector<pair<double, double> >& out)
+{
+	FEModel fem;
+
+	FEMaterial* matcopy = dynamic_cast<FEMaterial*>(CopyFEBioClass(mat, &fem));
+	if (matcopy == nullptr) return false;
+
+	fem.AddMaterial(matcopy);
+
+	FECoreKernel& febio = FECoreKernel::GetInstance();
+
+	FEMaterialTest diag(&fem);
+	diag.SetOutputFileName(nullptr);
+
+	FEDiagnosticScenario* s = diag.CreateScenario(sztest);
+	s->GetParameterList();
+	s->SetParameter<double>("strain", strain);
+
+	FEAnalysis* step = fem.GetStep(0);
+	step->m_ntime = steps;
+	step->m_dt0 = simtime / steps;
+	fem.SetCurrentStepIndex(0);
+
+	if (diag.Init() == false) return false;
+
+	if (fem.Init() == false) return false;
+
+	bool b = diag.Run();
+
+	if (b)
+	{
+		out = diag.GetOutputData();
+	}
+
+	return b;
 }
 
 } // namespace febio

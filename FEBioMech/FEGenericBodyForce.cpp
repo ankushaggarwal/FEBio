@@ -29,10 +29,9 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FEGenericBodyForce.h"
 #include "FEElasticMaterial.h"
-#include <FECore/FEModel.h>
 
 BEGIN_FECORE_CLASS(FEGenericBodyForce, FEBodyForce);
-	ADD_PARAMETER(m_force, "force");
+	ADD_PARAMETER(m_force, "force")->setUnits(UNIT_SPECIFIC_FORCE);
 END_FECORE_CLASS();
 
 //-----------------------------------------------------------------------------
@@ -47,9 +46,14 @@ vec3d FEGenericBodyForce::force(FEMaterialPoint &mp)
 }
 
 //-----------------------------------------------------------------------------
-mat3ds FEGenericBodyForce::stiffness(FEMaterialPoint& pt)
+mat3d FEGenericBodyForce::stiffness(FEMaterialPoint& pt)
 {
 	return mat3ds(0, 0, 0, 0, 0, 0);
+}
+
+void FEGenericBodyForce::StiffnessMatrix(FELinearSystem& LS)
+{
+	// Nothing to do here.
 }
 
 //=============================================================================

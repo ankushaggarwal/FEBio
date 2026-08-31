@@ -31,6 +31,7 @@ bld/
 [Ll]og/
 [Ll]ogs/
 build/
+build-wasm/
 
 
 # Visual Studio cache/options directory
@@ -391,6 +392,7 @@ MigrationBackup/
 
 # miscellaneous
 Documentation/Doxygen/doc
+Documentation/Doxygen/doc_only
 
 .DS_Store
 
@@ -425,12 +427,25 @@ DerivedData/
 
 ## cmake build directories
 cbuild/
-cmbuild/
+cmbuild*/
+vs22/
+CMakeFiles/
 
 ##cmake files
-CMakeLists.txt
+!CMakeLists.txt
 CMakeCache.txt
-*.cmake
+!*.cmake
 
 ## Visual Studio Code
 .vscode/
+
+Documentation/FEBio_Theory_Manual.pdf
+Documentation/FEBio_User_Manual.html.LyXconv/
+
+/FEBioMech/FECGSolidSolver - Copy.cpp
+
+febio*-sdk
+.envrc
+
+TestSuite
+*.gz

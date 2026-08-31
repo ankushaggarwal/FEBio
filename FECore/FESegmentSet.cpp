@@ -29,6 +29,7 @@ SOFTWARE.*/
 #include "stdafx.h"
 #include "FESegmentSet.h"
 #include "DumpStream.h"
+#include "FEMesh.h"
 
 //-----------------------------------------------------------------------------
 void FESegmentSet::SEGMENT::Serialize(DumpStream& ar)
@@ -38,7 +39,7 @@ void FESegmentSet::SEGMENT::Serialize(DumpStream& ar)
 }
 
 //-----------------------------------------------------------------------------
-FESegmentSet::FESegmentSet(FEModel* fem) : FEItemList(fem)
+FESegmentSet::FESegmentSet(FEModel* fem) : FEItemList(fem, FEItemList::FE_ELEMENT_SET)
 {
 }
 
@@ -66,4 +67,37 @@ void FESegmentSet::Serialize(DumpStream& ar)
 	FEItemList::Serialize(ar);
 	if (ar.IsShallow()) return;
 	ar & m_Seg;
+}
+
+void FESegmentSet::SaveClass(DumpStream& ar, FESegmentSet* p)
+{
+
+}
+
+FESegmentSet* FESegmentSet::LoadClass(DumpStream& ar, FESegmentSet* p)
+{
+	p = new FESegmentSet(&ar.GetFEModel());
+	return p;
+}
+
+//-----------------------------------------------------------------------------
+FENodeList FESegmentSet::GetNodeList() const
+{
+	FEMesh* mesh = GetMesh();
+	FENodeList set(mesh);
+	vector<int> tag(mesh->Nodes(), 0);
+	for (int i = 0; i < Segments(); ++i)
+	{
+		const SEGMENT& el = m_Seg[i];
+		int ne = el.ntype;
+		for (int j = 0; j < ne; ++j)
+		{
+			if (tag[el.node[j]] == 0)
+			{
+				set.Add(el.node[j]);
+				tag[el.node[j]] = 1;
+			}
+		}
+	}
+	return set;
 }

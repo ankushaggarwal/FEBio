@@ -28,7 +28,7 @@ SOFTWARE.*/
 
 #pragma once
 #include "FELoadController.h"
-#include "FEPointFunction.h"
+#include "PointCurve.h"
 
 //-----------------------------------------------------------------------------
 // Base class for load curves.
@@ -55,15 +55,27 @@ public:
     
     bool Init() override;
 
-	FEPointFunction& GetFunction() { return m_fnc; }
+	void Reset() override;
 
-	void SetInterpolation(FEPointFunction::INTFUNC f);
-	void SetExtendMode(FEPointFunction::EXTMODE f);
+	PointCurve& GetFunction() { return m_fnc; }
+
+	int GetInterpolation() const { return m_int; }
+	void SetInterpolation(PointCurve::INTFUNC f);
+
+	int GetExtendMode() const { return m_ext; }
+	void SetExtendMode(PointCurve::EXTMODE f);
+
+	std::vector<vec2d> GetPoints() const { return m_points; }
 
 	double GetValue(double time) override;
 
 private:
-	FEPointFunction	m_fnc;	//!< function to evaluate
+	int		m_int;
+	int		m_ext;
+	std::vector<vec2d>	m_points;
+
+private:
+	PointCurve	m_fnc;	//!< function to evaluate
 
 	DECLARE_FECORE_CLASS();
 };

@@ -32,8 +32,8 @@ SOFTWARE.*/
 
 // define the material parameters
 BEGIN_FECORE_CLASS(FEDamageMooneyRivlin, FEUncoupledMaterial)
-	ADD_PARAMETER(c1, FE_RANGE_GREATER(0.0), "c1");
-	ADD_PARAMETER(c2, "c2");
+	ADD_PARAMETER(c1, FE_RANGE_GREATER(0.0), "c1")->setUnits(UNIT_PRESSURE);
+	ADD_PARAMETER(c2, "c2")->setUnits(UNIT_PRESSURE);
 	ADD_PARAMETER(m_beta, "beta");
 	ADD_PARAMETER(m_smin, "smin");
 	ADD_PARAMETER(m_smax, "smax");
@@ -54,6 +54,12 @@ bool FEDamageMooneyRivlin::Validate()
 {
 	if (c1 + c2 <= 0) { feLogError("c1 + c2 must be a positive number."); return false; }
 	return FEUncoupledMaterial::Validate();
+}
+
+//-----------------------------------------------------------------------------
+FEMaterialPointData* FEDamageMooneyRivlin::CreateMaterialPointData() 
+{ 
+	return new FEDamageMaterialPoint(new FEElasticMaterialPoint); 
 }
 
 //-----------------------------------------------------------------------------
@@ -128,8 +134,9 @@ tens4ds FEDamageMooneyRivlin::DevTangent(FEMaterialPoint& mp)
 	// calculate C:d2WdCdC:C
 	double CWWC = 2*I2*W2;
 
-	// deviatoric cauchy-stress, trs = trace[s]/3
-	mat3ds devs = pt.m_s.dev();
+	// deviatoric cauchy-stress
+	mat3ds T = B * (W1 + W2 * I1) - B2 * W2;
+	mat3ds devs = T.dev() * (2.0 / J);
 
 	// Identity tensor
 	mat3ds I(1,1,1,0,0,0);

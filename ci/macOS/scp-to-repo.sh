@@ -1,0 +1,17 @@
+#! /bin/bash
+
+REMOTE_PATH="/serverRoot/update2/FEBioStudio2Dev/macOS/stage"
+if [ $# == 1 ] && [ "$1" != "develop" ]; then
+    REMOTE_PATH="/serverRoot/update2/FEBioStudio2Dev/branches/$1/macOS/stage"
+fi
+
+scp cmbuild/bin/* repo:$REMOTE_PATH/FEBioStudio.app/Contents/MacOS
+scp cmbuild/lib/* repo:$REMOTE_PATH/FEBioStudio.app/Contents/Frameworks
+ssh repo "chmod +x $REMOTE_PATH/FEBioStudio.app/Contents/MacOS/febio4"
+
+# package and upload sdk
+pushd sdk
+zip -r sdk.zip include
+zip -r sdk.zip lib
+scp sdk.zip repo:$REMOTE_PATH/
+popd

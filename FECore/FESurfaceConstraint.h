@@ -34,9 +34,16 @@ class FESurface;
 // Base class for nonlinear constraints that are defined using a surface.
 class FECORE_API FESurfaceConstraint : public FENLConstraint
 {
+	FECORE_BASE_CLASS(FESurfaceConstraint)
+
 public:
 	FESurfaceConstraint(FEModel* fem);
 
 	// return the surface
 	virtual FESurface* GetSurface() { return 0; }
+
+	// we need an integration rule for all surfaces. 
+	// By default, this was always assumed to be a nodal integration rule
+	// but this is not always desired, so derived classes can override this
+	virtual bool UseNodalIntegration() { return true; };
 };
